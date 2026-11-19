@@ -112,6 +112,22 @@ A D1 below MIN_D1 is raised to it, so the record comes late; this is logged, and
 the time actually reached is recorded. run.txt has '# type = decay', the flip
 angle, and three more columns: D1 (s), t (s after 'stop'; negative for the
 reference), and the target time.
+
+Power-dependence runs (TopSpin script powdep.py): 'powdep p1' runs powdep_p1.py,
+'powdep' alone lists the powdep_*.py files, and powdep_template.py is the
+template. A power-dependence run is a profile at one frequency in which the AWG
+drive voltage (the second argument of 'cw') changes from record to record: per
+set an optional OFF record, one ON record per voltage, and an optional OFF
+record, as OFF_MODE does for a profile. The voltages are given either directly
+(VOLTAGES, in V) or as fractions of the power at full drive (POWER_FRACTIONS),
+which are converted to voltages with the source's calibration,
+/opt/dnptools/awg_power_cal.txt (drive voltage in mV against output power in mW,
+measured at one frequency; the ratio P(V)/P(full drive) is taken to hold at every
+frequency). Full drive is MAX_AWG_VOLTAGE (0.4 V); no script sends a larger
+voltage, and fs, bu, and decay refuse a POWER above it. Voltages below the lowest
+calibration point are refused, since their power is not known. run.txt has
+'# type = powdep', the calibration used, and an eighth column with the drive
+voltage (V).
 """
 import math
 import os
@@ -149,6 +165,8 @@ VIEWER_PATH   = DNPTOOLS + "/fs_plot.py"
 INDEX_PATH    = "/opt/nmrdata/fs_runs.tsv"      # common index, one line per run start and end
 RUNS_SUBDIR   = "fs_runs"                       # run folders, inside each dataset
 SETTINGS_DIR  = "/opt/nmrdata/fs_settings"      # settings_<name>.py files
+POWER_CAL_PATH  = DNPTOOLS + "/awg_power_cal.txt"   # drive voltage (mV) -> source power (mW)
+MAX_AWG_VOLTAGE = 0.4                           # full drive: the largest second argument of 'cw'
 
 # ---- Settings: (name, default) ------------------------------------------------
 REQUIRED = "<required>"
@@ -255,6 +273,42 @@ DECAY_SETTINGS = [
 ]
 
 
+# Power-dependence runs (powdep.py): a profile at one frequency over AWG drive voltages
+POWDEP_SETTINGS = [
+    ("RUN_LABEL",        REQUIRED),   # default: powdep_<name> of powdep_<name>.py
+    ("SAMPLE",           ""),
+    ("MAS_INFO",         ""),
+    ("DATA_DIR",         ""),
+    ("DATA_NAME",        ""),
+    ("START_EXPNO",      REQUIRED),
+    ("TEMPLATE_EXPNO",   None),
+    ("REPEATS",          1),
+    ("OFF_MODE",         "both"),     # "start", "end", "both" or "none"
+    ("FREQ",             REQUIRED),   # GHz, for every ON record
+    ("VOLTAGES",         None),       # AWG drive voltages (V), in acquisition order; or
+    ("POWER_FRACTIONS",  None),       # fractions of the power at full drive, in acquisition order
+    ("POWER_CAL",        None),       # calibration file; None = POWER_CAL_PATH
+    ("D1",               REQUIRED),
+    ("DS",               0),
+    ("ON_SCANS",         REQUIRED),
+    ("OFF_SCANS",        REQUIRED),
+    ("AWG_SETTLE",       2),
+    ("SCAN_OVERHEAD",    5),
+    ("POLL_INTERVAL",    5),
+    ("MAX_EXTRA_WAIT",   300),
+    ("POST_ACQ_PAD",     5),
+    ("EST_OVERHEAD",     5),
+    ("AWG_RETRIES",      3),
+    ("MAX_CONSEC_SKIPS", 3),
+    ("PROCESS_CMDS",     ["efp", "absn"]),
+    ("PEAK_PPM",         None),
+    ("PEAK_WINDOW_PPM",  10.0),
+    ("INTENSITY_MODE",   "extreme"),
+    ("LAUNCH_VIEWER",    True),
+    ("RESPAWN_VIEWER",   True),
+]
+
+
 def frange(start, stop, step):
     result = []
     current = start
@@ -297,6 +351,112 @@ def ns_for_time(d1_list, seconds, ns_min=None, ns_max=None, multiple=1, overhead
             ns = min(ns, int(ns_max))
         out.append(max(lo, (ns // multiple) * multiple))
     return out
+
+
+def read_power_cal(path):
+    """(freq_GHz or None, [V], [mW]) from a calibration file: one 'mV mW' pair per line,
+    and optionally a line 'freq_GHz = <GHz>'; '#' starts a comment. Raises ValueError if
+    there are fewer than two points or the power does not rise with the voltage."""
+    freq, pts = None, []
+    fh = open(path)
+    try:
+        for line in fh:
+            body = line.split("#", 1)[0].strip()
+            if not body:
+                continue
+            m = re.match(r"freq_GHz\s*=\s*(\S+)$", body)
+            if m:
+                freq = float(m.group(1))
+                continue
+            parts = body.replace(",", " ").split()
+            if len(parts) != 2:
+                raise ValueError("line '%s' is not 'mV mW'" % body)
+            pts.append((float(parts[0]) / 1000.0, float(parts[1])))
+    finally:
+        fh.close()
+    pts.sort()
+    if len(pts) < 2:
+        raise ValueError("fewer than two points")
+    vs, ps = [p[0] for p in pts], [p[1] for p in pts]
+    for i in range(1, len(pts)):
+        if not (vs[i] > vs[i - 1] and ps[i] > ps[i - 1]):
+            raise ValueError("the power must rise with the voltage (at %g mV)" % (vs[i] * 1000.0))
+    return freq, vs, ps
+
+
+def mono_slopes(xs, ys):
+    """Slopes at the points for a monotone piecewise-cubic (Fritsch-Carlson, as PCHIP)
+    interpolation of increasing data; fs_plot.py uses the same."""
+    n = len(xs)
+    h = [xs[i + 1] - xs[i] for i in range(n - 1)]
+    d = [(ys[i + 1] - ys[i]) / h[i] for i in range(n - 1)]
+    if n == 2:
+        return [d[0], d[0]]
+    m = [d[0]] + [0.0] * (n - 2) + [d[-1]]
+    for i in range(1, n - 1):
+        if d[i - 1] * d[i] > 0:
+            w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    return m
+
+
+def mono_interp(xs, ys, m, x):
+    """The interpolant through (xs, ys) with slopes m at x (xs[0] <= x <= xs[-1])."""
+    i = 0
+    while i < len(xs) - 2 and x > xs[i + 1]:
+        i += 1
+    h = xs[i + 1] - xs[i]
+    t = (x - xs[i]) / h
+    return ((2 * t ** 3 - 3 * t ** 2 + 1) * ys[i] + (t ** 3 - 2 * t ** 2 + t) * h * m[i]
+            + (-2 * t ** 3 + 3 * t ** 2) * ys[i + 1] + (t ** 3 - t ** 2) * h * m[i + 1])
+
+
+def power_of_voltage(cal, v):
+    """Source power (mW, at the calibration frequency) at drive voltage v (V)."""
+    return mono_interp(cal["v"], cal["p"], cal["m"], v)
+
+
+def voltage_of_fraction(cal, f):
+    """Drive voltage (V) whose power is the fraction f of the power at full drive."""
+    target = f * cal["p_full"]
+    lo, hi = cal["v"][0], MAX_AWG_VOLTAGE
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if power_of_voltage(cal, mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def load_power_cal(path):
+    """The calibration as a dict (freq, v, p, m, p_full, path); raises ValueError."""
+    freq, vs, ps = read_power_cal(path)
+    if vs[-1] < MAX_AWG_VOLTAGE - 1e-9:
+        raise ValueError("it ends at %g mV, below full drive (%g mV)" % (vs[-1] * 1000.0, MAX_AWG_VOLTAGE * 1000.0))
+    cal = {"freq": freq, "v": vs, "p": ps, "m": mono_slopes(vs, ps), "path": path}
+    cal["p_full"] = power_of_voltage(cal, MAX_AWG_VOLTAGE)
+    return cal
+
+
+def check_power(fail, name, v):
+    """True if v (a number) is a usable second argument of 'cw': 0 < v <= MAX_AWG_VOLTAGE."""
+    if not 0 < v <= MAX_AWG_VOLTAGE + 1e-9:
+        fail("%s must be above 0 and at most %g, the largest AWG drive voltage (got %s)."
+             % (name, MAX_AWG_VOLTAGE, v))
+        return False
+    return True
+
+
+def kind_hint(S, cmd):
+    """For an error box: the command the settings S look written for, if not cmd."""
+    for name, keys, what in (("powdep", ("VOLTAGES", "POWER_FRACTIONS"), "power-dependence"),
+                             ("decay", ("TIMES_LIST", "POLARIZE_TIME"), "decay"),
+                             ("bu", ("D1_LIST", "SERIES", "NS_LIST"), "build-up"),
+                             ("fs", ("FREQS", "PROFILE_NS"), "frequency-profile")):
+        if name != cmd and [k for k in keys if k in S]:
+            return "This looks like a %s settings file: run it with '%s'" % (what, name)
+    return ""
 
 
 def fmt_dur(sec):
@@ -376,6 +536,11 @@ def run_decay_settings(args=None):
     run_from_args(args, "decay", "decay_", "decay_", run_decay)
 
 
+def run_powdep_settings(args=None):
+    """Entry point of powdep.py. args: the words after 'powdep' on TopSpin's command line."""
+    run_from_args(args, "powdep", "powdep_", "powdep_", run_powdep)
+
+
 def run_from_args(args, cmd, prefix, label_prefix, runner):
     """Finds and reads the settings file named in args (or chosen from a list) and runs it
     with runner; RUN_LABEL defaults to label_prefix + <name> of <prefix><name>.py."""
@@ -446,10 +611,7 @@ def failer(label):
 def run_profile(S, source=None):
     """Runs the profile described by the settings dict S; source: the settings file, if any."""
     # ---- Settings ------------------------------------------------------------
-    c = check_settings(S, SETTINGS, "This looks like a build-up settings file: run it with 'bu'"
-                       if ("D1_LIST" in S or "SERIES" in S) else
-                       "This looks like a decay settings file: run it with 'decay'"
-                       if ("TIMES_LIST" in S or "POLARIZE_TIME" in S) else "")
+    c = check_settings(S, SETTINGS, kind_hint(S, "fs"))
     if c is None:
         return
     RUN_LABEL        = str(c["RUN_LABEL"]).strip()
@@ -490,6 +652,8 @@ def run_profile(S, source=None):
         float(POWER)
     except CATCH:
         fail("POWER must be a number (got %r)." % (POWER,))
+        return
+    if not check_power(fail, "POWER", float(POWER)):
         return
 
     # ---- Run plan: per set an optional OFF, one ON per frequency, an optional OFF ----
@@ -604,10 +768,7 @@ def run_profile(S, source=None):
 def run_buildup(S, source=None):
     """Runs the build-up described by the settings dict S; source: the settings file, if any."""
     # ---- Settings ------------------------------------------------------------
-    c = check_settings(S, BU_SETTINGS, "This looks like a frequency-profile settings file: run it "
-                       "with 'fs'" if ("FREQS" in S or "OFF_MODE" in S) else
-                       "This looks like a decay settings file: run it with 'decay'"
-                       if ("TIMES_LIST" in S or "POLARIZE_TIME" in S) else "")
+    c = check_settings(S, BU_SETTINGS, kind_hint(S, "bu"))
     if c is None:
         return
     RUN_LABEL        = str(c["RUN_LABEL"]).strip()
@@ -684,6 +845,8 @@ def run_buildup(S, source=None):
                         else "the second argument of the AWG 'cw' command", c[name]))
                 return
         FREQ, POWER = float(FREQ), float(POWER)
+        if not check_power(fail, "POWER", POWER):
+            return
 
     # ---- Run plan ---------------------------------------------------------------
     n = len(d1s)
@@ -822,8 +985,7 @@ def run_decay(S, source=None):
     NS 1); 'stop'; then one record (OFF, NS 1) per target time after the microwaves went off,
     each with the D1 that brings its pulse to that time."""
     # ---- Settings ------------------------------------------------------------
-    c = check_settings(S, DECAY_SETTINGS, "This looks like a frequency-profile or build-up settings "
-                       "file: run it with 'fs' or 'bu'" if ("FREQS" in S or "D1_LIST" in S) else "")
+    c = check_settings(S, DECAY_SETTINGS, kind_hint(S, "decay"))
     if c is None:
         return
     RUN_LABEL        = str(c["RUN_LABEL"]).strip()
@@ -852,6 +1014,8 @@ def run_decay(S, source=None):
             return
     FREQ, POWER, POLARIZE_TIME = nums["FREQ"], nums["POWER"], nums["POLARIZE_TIME"]
     FLIP_DEG, ZG_LATENCY, MIN_D1 = nums["FLIP_DEG"], nums["ZG_LATENCY"], nums["MIN_D1"]
+    if not check_power(fail, "POWER", POWER):
+        return
     if POLARIZE_TIME <= 0:
         fail("POLARIZE_TIME must be positive.")
         return
@@ -1036,6 +1200,218 @@ def run_decay(S, source=None):
         "start_desc": "%d set(s), %g s polarization, %d decay times per set" % (REPEATS, POLARIZE_TIME,
                                                                               len(targets)),
         "end_desc": "%d set(s), %d decay times per set" % (REPEATS, len(targets))}, source)
+
+
+def run_powdep(S, source=None):
+    """Runs the power dependence described by the settings dict S: per set an optional OFF,
+    one ON record at FREQ per drive voltage, an optional OFF (as a profile with OFF_MODE)."""
+    # ---- Settings ------------------------------------------------------------
+    c = check_settings(S, POWDEP_SETTINGS, kind_hint(S, "powdep"))
+    if c is None:
+        return
+    RUN_LABEL        = str(c["RUN_LABEL"]).strip()
+    SAMPLE           = c["SAMPLE"]
+    MAS_INFO         = c["MAS_INFO"]
+    REPEATS          = c["REPEATS"]
+    OFF_MODE         = str(c["OFF_MODE"]).strip().lower()
+    D1               = c["D1"]
+    DS               = c["DS"]
+    ON_SCANS         = c["ON_SCANS"]
+    OFF_SCANS        = c["OFF_SCANS"]
+    INTENSITY_MODE   = str(c["INTENSITY_MODE"]).strip().lower()
+    fail = failer(RUN_LABEL)
+    h = html_text
+
+    if not re.match(r"^[A-Za-z0-9_-]+$", RUN_LABEL):
+        fail("RUN_LABEL may contain only letters, digits, '-' and '_' (got '%s')." % RUN_LABEL)
+        return
+    if OFF_MODE not in ("start", "end", "both", "none"):
+        fail("OFF_MODE must be 'start', 'end', 'both' or 'none' (got '%s')." % OFF_MODE)
+        return
+    if INTENSITY_MODE not in ("extreme", "max", "sum"):
+        fail("INTENSITY_MODE must be 'extreme', 'max' or 'sum' (got '%s')." % INTENSITY_MODE)
+        return
+    if not isinstance(REPEATS, int) or REPEATS < 1:
+        fail("REPEATS must be a positive integer.")
+        return
+    try:
+        FREQ = float(c["FREQ"])
+    except CATCH:
+        fail("FREQ must be the mm-wave frequency in GHz (got %r)." % (c["FREQ"],))
+        return
+
+    # ---- Calibration and drive voltages ------------------------------------------
+    cal_path = c["POWER_CAL"] or POWER_CAL_PATH
+    try:
+        cal = load_power_cal(cal_path)
+    except CATCH as ex:
+        fail("The power calibration %s could not be used: %s." % (cal_path, ex))
+        return
+    v_lo = cal["v"][0]
+    if (c["VOLTAGES"] is None) == (c["POWER_FRACTIONS"] is None):
+        fail("Set either VOLTAGES (AWG drive voltages in V) or POWER_FRACTIONS (fractions of "
+             "the power at %g V), not both and not neither." % MAX_AWG_VOLTAGE)
+        return
+    volts = []
+    if c["VOLTAGES"] is not None:
+        try:
+            given = [float(x) for x in c["VOLTAGES"]]
+        except CATCH:
+            fail("VOLTAGES must be a list of AWG drive voltages in V.")
+            return
+        for v in given:
+            if not check_power(fail, "Each of VOLTAGES", v):
+                return
+            if v < v_lo - 1e-9:
+                fail("VOLTAGES: %g V is below the lowest point of the calibration (%g V in %s), so "
+                     "its power is not known. Add calibration points below it to go lower."
+                     % (v, v_lo, cal_path))
+                return
+            volts.append(round(v, 3))
+    else:
+        f_lo = power_of_voltage(cal, v_lo) / cal["p_full"]
+        try:
+            fracs = [float(x) for x in c["POWER_FRACTIONS"]]
+        except CATCH:
+            fail("POWER_FRACTIONS must be a list of fractions of the power at %g V." % MAX_AWG_VOLTAGE)
+            return
+        for f in fracs:
+            if not f_lo - 1e-9 <= f <= 1.0 + 1e-9:
+                fail("POWER_FRACTIONS: %g is outside what the calibration covers, %.3f (at %g V) to 1 "
+                     "(at %g V)." % (f, f_lo, v_lo, MAX_AWG_VOLTAGE))
+                return
+            volts.append(round(min(MAX_AWG_VOLTAGE, max(v_lo, voltage_of_fraction(cal, f))), 3))
+    if not volts:
+        fail("%s is empty." % ("VOLTAGES" if c["VOLTAGES"] is not None else "POWER_FRACTIONS"))
+        return
+
+    def frac(v):
+        return power_of_voltage(cal, v) / cal["p_full"]
+
+    def mw(v):
+        return power_of_voltage(cal, v)
+    cal_freq = ("%.3f GHz" % cal["freq"]) if cal["freq"] is not None else "the calibration frequency"
+
+    # ---- Run plan: per set an optional OFF, one ON per voltage, an optional OFF ----
+    per_set = []
+    if OFF_MODE in ("start", "both"):
+        per_set.append(("OFF", "start"))
+    for v in volts:
+        per_set.append(("ON", v))
+    if OFF_MODE in ("end", "both"):
+        per_set.append(("OFF", "end"))
+    points_per_set  = len(volts)
+    records_per_set = len(per_set)
+    n_off_per_set   = records_per_set - points_per_set
+
+    def set_tag(set_number):
+        return ("set %d | " % set_number) if REPEATS > 1 else ""
+
+    def make_plan(start_expno):
+        plan = []
+        for set_number in range(1, REPEATS + 1):
+            base = start_expno + (set_number - 1) * records_per_set
+            tag = set_tag(set_number)
+            for i in range(records_per_set):
+                kind, val = per_set[i]
+                if kind == "OFF":
+                    plan.append({
+                        "expno": base + i, "set": set_number, "kind": "OFF", "label": val,
+                        "freq": None, "volt": None, "d1": D1, "ns": OFF_SCANS, "awg": "stop",
+                        "title": ("OFF (%s) | %s%s | %s | microwave off | D1 = %s s | %d scans"
+                                  % (val, tag, SAMPLE, MAS_INFO, D1, OFF_SCANS)),
+                        "what": "%sOFF %s" % (tag, val)})
+                else:
+                    cmdstr = 'cw %.3f %.3f' % (FREQ, val)
+                    plan.append({
+                        "expno": base + i, "set": set_number, "kind": "ON", "label": "on",
+                        "freq": FREQ, "volt": val, "d1": D1, "ns": ON_SCANS, "awg": cmdstr,
+                        "title": ("power dep | %s%s | %s | %s | %.3f of full power | D1 = %s s | %d scan(s)"
+                                  % (tag, SAMPLE, MAS_INFO, cmdstr, frac(val), D1, ON_SCANS)),
+                        "what": "%sON %.3f V" % (tag, val),
+                        "skip": "%s%.3f V" % (tag, val), "last": "%.3f V" % val})
+        return plan
+
+    def dialog_rows(plan):
+        def set_line(set_number):
+            recs = [p for p in plan if p["set"] == set_number]
+            offs = [p["expno"] for p in recs if p["kind"] == "OFF"]
+            ons  = [p["expno"] for p in recs if p["kind"] == "ON"]
+            parts = []
+            if OFF_MODE in ("start", "both"):
+                parts.append("OFF %d" % offs[0])
+            parts.append("ON %d&#8211;%d" % (ons[0], ons[-1]))
+            if OFF_MODE in ("end", "both"):
+                parts.append("OFF %d" % offs[-1])
+            pre = ("set %d: " % set_number) if REPEATS > 1 else ""
+            return pre + ", then ".join(parts)
+
+        shown = list(range(1, REPEATS + 1))
+        if REPEATS > 6:
+            shown = [1, 2, 3, None, REPEATS]
+        plan_html = "<br>".join([("..." if n is None else set_line(n)) for n in shown])
+        items = ["%.3f V (%.2f, %.1f mW)" % (v, frac(v), mw(v)) for v in volts]
+        lines = [", ".join(items[i:i + 4]) for i in range(0, len(items), 4)]
+        power_html = ("%d per set, in this order: drive voltage (fraction of the power at %g V, "
+                      "mW at %s)<br>%s" % (points_per_set, MAX_AWG_VOLTAGE, h(cal_freq), "<br>".join(lines)))
+        return [("Plan", plan_html),
+                ("mm-wave", "%.3f GHz, AWG 'cw %.3f &lt;voltage&gt;'; calibration %s"
+                 % (FREQ, FREQ, h(cal_path))),
+                ("Powers", power_html),
+                ("Scans", "ON records NS %d, OFF records NS %d; D1 %s s, DS %d"
+                 % (ON_SCANS, OFF_SCANS, h(D1), DS))]
+
+    def timing(plan, record_time):
+        per_point_time = record_time(ON_SCANS, D1)
+        off_time       = record_time(OFF_SCANS, D1)
+        total_time     = REPEATS * (per_point_time * points_per_set + off_time * n_off_per_set)
+        note = ("ON ~%s per point, OFF ~%s each" % (fmt_dur(per_point_time), fmt_dur(off_time))
+                if n_off_per_set else "ON ~%s per point" % fmt_dur(per_point_time))
+        return total_time, note
+
+    def header(run_id, ds_root, peak_str, started):
+        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+                "# type = powdep\n"
+                "# run_id = %s\n"
+                "# label = %s\n"
+                "# sample = %s\n"
+                "# conditions = %s\n"
+                "# dataset_dir = %s\n"
+                "# off_mode = %s\n"
+                "# peak_ppm = %s\n"
+                "# window_ppm = %s\n"
+                "# mode = %s\n"
+                "# freq_GHz = %.4f\n"
+                "# full_power_V = %g\n"
+                "# cal_file = %s\n"
+                "# cal_freq_GHz = %s\n"
+                "# cal_mV = %s\n"
+                "# cal_mW = %s\n"
+                "# d1 = %s\n"
+                "# repeats = %d\n"
+                "# started = %s\n"
+                "# drive_V: second argument of 'cw'; the viewer converts it to power with cal_mV/cal_mW\n"
+                "# columns: expno, kind, label, freq_GHz, ns, finished, set, drive_V\n"
+                % (run_id, RUN_LABEL, SAMPLE, MAS_INFO, ds_root, OFF_MODE, peak_str,
+                   repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, FREQ, MAX_AWG_VOLTAGE, cal_path,
+                   "none" if cal["freq"] is None else repr(cal["freq"]),
+                   ",".join(["%g" % (v * 1000.0) for v in cal["v"]]), ",".join(["%g" % p for p in cal["p"]]),
+                   D1, REPEATS, started))
+
+    def row_extra(rec):
+        return ("\t%.3f" % rec["volt"]) if rec["kind"] == "ON" else "\t-"
+
+    run_records(c, {
+        "noun": "power dependence", "table": POWDEP_SETTINGS, "make_plan": make_plan,
+        "dialog_rows": dialog_rows, "timing": timing, "header": header,
+        "used": {"OFF_MODE": OFF_MODE, "FREQ": FREQ, "VOLTAGES": volts,
+                 "POWER_FRACTIONS": c["POWER_FRACTIONS"], "POWER_CAL": cal_path},
+        "settings_comments": lambda plan, record_time: [],
+        "row_extra": row_extra,
+        "d1_column": False, "on_noun": "ON points",
+        "start_desc": "%d set(s), OFF mode %s, %d powers per set at %.3f GHz"
+                      % (REPEATS, OFF_MODE, points_per_set, FREQ),
+        "end_desc": "%d set(s), OFF mode %s" % (REPEATS, OFF_MODE)}, source)
 
 
 def run_records(c, job, source):

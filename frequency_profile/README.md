@@ -1,16 +1,18 @@
-# DNP frequency profiles, build-ups, and decays
+# DNP frequency profiles, build-ups, decays, and power dependences
 
-Acquisition and live display of DNP frequency profiles, build-up curves, and
-decays on the 800 MHz DNP spectrometer (TopSpin 3.6.2). For a profile, a TopSpin
+Acquisition and live display of DNP frequency profiles, build-up curves,
+decays, and power dependences on the 800 MHz DNP spectrometer (TopSpin 3.6.2). For a profile, a TopSpin
 script steps the mm-wave frequency through the AWG, acquires and processes one
 record per frequency, and a viewer plots the enhancement against frequency while
 the records come in. For a build-up, a second script acquires one record per
 build-up time D1, at one frequency or with the microwaves off, and the viewer
 plots and fits the intensity against D1. For a decay, a third script polarizes
 with the microwaves on, switches them off, and acquires small-flip-angle records
-at set times afterwards; the viewer fits the decay back to equilibrium. Another
-TopSpin script applies the phase set in the viewer to the TopSpin data after a
-run.
+at set times afterwards; the viewer fits the decay back to equilibrium. For a
+power dependence, a fourth script acquires one record per AWG drive voltage at
+one frequency, and the viewer plots the enhancement against the mm-wave power
+from the source's calibration. Another TopSpin script applies the phase set in
+the viewer to the TopSpin data after a run.
 
 The headers of `fs_core.py`, `fs_plot.py`, and `fs_rephase_core.py` describe in
 detail what each program does; this page covers installation and use.
@@ -19,13 +21,15 @@ detail what each program does; this page covers installation and use.
 
 | In this folder | Installed as | What it is |
 |---|---|---|
-| `dnptools/fs_core.py` | `/opt/dnptools/fs_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, and decays: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
-| `dnptools/fs_plot.py` | `/opt/dnptools/fs_plot.py` | Viewer (Python 3): profile, build-up, or decay with fits, one record at a time, phase/baseline/window, exports |
+| `dnptools/fs_core.py` | `/opt/dnptools/fs_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, decays, and power dependences: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
+| `dnptools/fs_plot.py` | `/opt/dnptools/fs_plot.py` | Viewer (Python 3): profile, build-up, decay, or power dependence with fits, one record at a time, phase/baseline/window, exports |
+| `dnptools/awg_power_cal.txt` | `/opt/dnptools/awg_power_cal.txt` | Output power of the 527 GHz source against the AWG drive voltage (for power dependences) |
 | `dnptools/fs_rephase_core.py` | `/opt/dnptools/fs_rephase_core.py` | Post-run phasing of the TopSpin data with the viewer's phase |
 | `dnptools/awg_cmd.py` | `/opt/dnptools/awg_cmd.py` | Sends one command to the AWG control server (set its address; see below) |
 | `topspin/fs.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/fs.py` | TopSpin command `fs <name>` (profile) |
 | `topspin/bu.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/bu.py` | TopSpin command `bu <name>` (build-up) |
 | `topspin/decay.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/decay.py` | TopSpin command `decay <name>` (decay) |
+| `topspin/powdep.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/powdep.py` | TopSpin command `powdep <name>` (power dependence) |
 | `topspin/fs_rephase.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/fs_rephase.py` | TopSpin command `fs_rephase` |
 | `settings/settings_template.py` | `/opt/nmrdata/fs_settings/` | Template for the settings files, one per kind of experiment |
 | `settings/settings_p1.py`, `settings_bdpa.py`, `settings_nox.py` | `/opt/nmrdata/fs_settings/` | Settings for the P1 diamond, BDPA, and m-TinyPol profiles |
@@ -33,13 +37,15 @@ detail what each program does; this page covers installation and use.
 | `settings/buildup_p1.py`, `buildup_bdpa.py`, `buildup_nox.py` | `/opt/nmrdata/fs_settings/` | Build-up settings for the same samples (set `FREQ` before the first run) |
 | `settings/decay_template.py` | `/opt/nmrdata/fs_settings/` | Template for the decay settings files |
 | `settings/decay_p1.py` | `/opt/nmrdata/fs_settings/` | Decay settings for the P1 diamond at 100 K (set `FREQ` before the first run) |
+| `settings/powdep_template.py` | `/opt/nmrdata/fs_settings/` | Template for the power-dependence settings files |
+| `settings/powdep_p1.py` | `/opt/nmrdata/fs_settings/` | Power-dependence settings for the P1 diamond (set `FREQ` and D1 before the first run) |
 
 The TopSpin scripts only start the code in `/opt/dnptools` (with `execfile`,
 so that TopSpin always runs the current version without being restarted).
 
 ## Requirements
 
-- TopSpin 3.6.2 (its Jython 2.7 runs `fs.py`, `bu.py`, `decay.py`, and `fs_rephase.py`).
+- TopSpin 3.6.2 (its Jython 2.7 runs `fs.py`, `bu.py`, `decay.py`, `powdep.py`, and `fs_rephase.py`).
 - `python` on the PATH, Python 2.7 or 3, for `awg_cmd.py`.
 - For the viewer: `/usr/bin/python3` (3.6 or newer) with `numpy`, `matplotlib`
   (3.3 or newer), and `python3-tk`. Without a display the viewer writes its
@@ -58,13 +64,13 @@ cd frequency_profile
 # programs (-n: an existing awg_cmd.py, with the real address, is kept)
 sudo mkdir -p /opt/dnptools
 sudo cp dnptools/fs_core.py dnptools/fs_plot.py dnptools/fs_rephase_core.py /opt/dnptools/
-sudo cp -n dnptools/awg_cmd.py /opt/dnptools/
-sudo chmod a+r /opt/dnptools/*.py
+sudo cp -n dnptools/awg_cmd.py dnptools/awg_power_cal.txt /opt/dnptools/
+sudo chmod a+r /opt/dnptools/*.py /opt/dnptools/awg_power_cal.txt
 
 # TopSpin commands
-sudo cp topspin/fs.py topspin/bu.py topspin/decay.py topspin/fs_rephase.py /opt/topspin3.6.2/exp/stan/nmr/py/user/
-sudo chmod a+r /opt/topspin3.6.2/exp/stan/nmr/py/user/fs.py /opt/topspin3.6.2/exp/stan/nmr/py/user/bu.py \
-               /opt/topspin3.6.2/exp/stan/nmr/py/user/decay.py /opt/topspin3.6.2/exp/stan/nmr/py/user/fs_rephase.py
+U=/opt/topspin3.6.2/exp/stan/nmr/py/user
+sudo cp topspin/fs.py topspin/bu.py topspin/decay.py topspin/powdep.py topspin/fs_rephase.py $U/
+sudo chmod a+r $U/fs.py $U/bu.py $U/decay.py $U/powdep.py $U/fs_rephase.py
 
 # settings (-n: settings files already on the spectrometer are kept)
 sudo mkdir -p /opt/nmrdata/fs_settings
@@ -74,7 +80,9 @@ sudo chown -R nmrsu /opt/nmrdata/fs_settings      # editable by the TopSpin user
 
 On a new installation, set `HOST` (and `PORT`) in `/opt/dnptools/awg_cmd.py` to
 the AWG control server's address: the repository keeps a placeholder, as it does
-for the monitor's instrument addresses. The settings files are edited on the
+for the monitor's instrument addresses. `awg_power_cal.txt` is copied with `-n`
+too, so a calibration measured on the spectrometer is kept; copy it without `-n`
+to replace it with the repository's version. The settings files are edited on the
 spectrometer; to replace one with the repository's version, copy it without `-n`.
 
 A viewer that is already open keeps running the old code; close it and reopen
@@ -218,6 +226,53 @@ off, and the target time. A decay file given to `fs` or `bu`, or another
 settings file given to `decay`, is refused with a message that says which
 command to use.
 
+## Running a power dependence
+
+A power dependence is a profile at one frequency in which the AWG drive voltage
+(the second argument of `cw`) changes from record to record. Each set
+(`REPEATS`) is an optional OFF record, one ON record per voltage, and an
+optional OFF record, placed by `OFF_MODE` as in a profile; the viewer plots
+I_on/I_off − 1 with the start OFF of the set.
+
+Full drive is 0.4 V. No script sends more: `powdep` refuses a larger voltage,
+and `fs`, `bu`, and `decay` refuse a `POWER` above 0.4 before anything starts.
+
+The voltages come from one of two settings:
+- `POWER_FRACTIONS`: fractions of the power at full drive. The script converts
+  them to voltages (rounded to 1 mV) with the source's calibration,
+  `/opt/dnptools/awg_power_cal.txt`, by a monotone cubic interpolation. The
+  source saturates near full drive (97% of full power at 0.35 V), so this spaces
+  the points in power, where evenly spaced voltages would crowd them at the top.
+- `VOLTAGES`: the drive voltages in V, used as given.
+
+The calibration was measured at 526.012 GHz (AWG 1.903 GHz): drive voltage in
+mV against output power in mW, from 100 to 450 mV. The ratio P(V)/P(0.4 V) is
+taken to hold at every frequency, the absolute mW only at 526.012 GHz. Voltages
+below the first calibration point (100 mV, 9% of full power) are refused, since
+their power is not known; add points to the file to go lower. Each run copies
+the table into its `run.txt`, so a later change to the file does not change
+old runs.
+
+1. Make a settings file, or use `powdep_p1.py`:
+
+   ```bash
+   cp /opt/nmrdata/fs_settings/powdep_template.py /opt/nmrdata/fs_settings/powdep_<name>.py
+   ```
+
+   Besides the dataset, template, and live-plot settings of a profile it has
+   `FREQ` (GHz), one of `POWER_FRACTIONS` and `VOLTAGES`, `D1`, `ON_SCANS`,
+   and `OFF_SCANS`. T_B shortens as the power rises, so D1 gives the
+   steady-state enhancement at every power only if it is several T_B at the
+   lowest power; a shorter D1 mixes the enhancement with the build-up rate. A
+   scrambled order of the powers separates a drift over the run from the effect
+   of the power.
+2. In TopSpin, type `powdep <name>` (`powdep` alone lists the files).
+3. The confirmation dialog lists every point as drive voltage, fraction of full
+   power, and mW at the calibration frequency, in acquisition order.
+
+The run folder is labelled `powdep_<name>`; `run.txt` has `# type = powdep`,
+the calibration, and the drive voltage of each record in an eighth column.
+
 ## The viewer
 
 It opens by itself during a run; to open it later, for any run:
@@ -337,6 +392,23 @@ with its fitted curve.
 - With `extreme` or `max`, weak points are biased upward by noise (the largest
   of many noisy points); for a tail near the noise level, `sum` or FID(t0)
   avoids this bias.
+
+### Power-dependence runs in the viewer
+
+- **Axes:** the x axis is the fraction of full power, P/P_full, with the power in
+  mW (from the calibration, valid at its frequency) under each tick. The drive
+  voltage of each point is along the top. "√P" plots against √(P/P_full)
+  instead, which is proportional to the mm-wave field.
+- **Fit:** "saturation" fits y = A·P/(P + P½) to each set, or to the means with
+  "repeats" error bars; "none" shows the points only. For intensities (no
+  start OFF), the fit is y₀ + A·P/(P + P½). The fit row gives A, P½ as a
+  fraction and in mW, and the share of A that full power reaches. It notes when
+  P½ lies above the highest power measured, so that A is an extrapolation.
+- **The rest** works as for a profile: integral, FID phase, FID(t0), error bars
+  and the 1/σ² weights, click-to-record, and the CSV.
+- **Exports:** "Export: Power EPS" writes `powdep.eps`. `values.tsv` adds
+  `drive_V`, `power_fraction`, `power_mW_cal`, and `y_fit`; `records.csv` adds
+  the first three.
 
 ### Error bars
 

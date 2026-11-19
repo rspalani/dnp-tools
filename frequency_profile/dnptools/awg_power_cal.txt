@@ -1,0 +1,23 @@
+# awg_power_cal.txt  -  output power of the 527 GHz solid-state source against the AWG drive
+# voltage (the second argument of the AWG 'cw' command), for powdep.py and fs_plot.py.
+#
+# One point per line: drive voltage in mV, output power in mW. Points in any order; the
+# power must rise with the voltage. Between points the scripts interpolate with a monotone
+# cubic; outside the points nothing is assumed, so voltages below the first point are
+# refused. The table must reach full drive, 400 mV (MAX_AWG_VOLTAGE in fs_core.py).
+#
+# Measured at one frequency (freq_GHz). The ratio P(V)/P(400 mV) is taken to hold at every
+# frequency; the absolute power in mW only at freq_GHz.
+# Each run copies this table into its run.txt, so later changes here do not change old runs.
+freq_GHz = 526.012       # AWG at 1.903 GHz
+# mV    mW
+100     5.3
+150     21.8
+200     38.3
+250     48.8
+300     54.6
+350     57.8
+400     59.6
+420     60.0
+440     60.2
+450     60.3

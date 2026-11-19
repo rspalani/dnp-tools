@@ -210,6 +210,22 @@ Decay runs
     decay.eps. The 'Timing' row reports how well the records met their target
     times.
 
+Power-dependence runs
+    A run file with '# type = powdep' (written by powdep.py) is a profile at one frequency
+    in which the AWG drive voltage changes from record to record; the eighth column holds
+    the voltage, and the header the source's calibration (cal_mV, cal_mW, cal_freq_GHz,
+    full_power_V; awg_power_cal.txt next to this file is used for a run file without
+    them). Each ON record is plotted against the fraction of the power at full drive,
+    P/P_full, from a monotone cubic interpolation of the calibration, with the power in
+    mW (the calibration's, valid at its frequency) under each tick and the drive voltage
+    of each point along the top; '√P' plots against sqrt(P/P_full) instead. y is as for
+    a profile: I_on/I_off - 1 with the start OFF of the set (the intensity per scan
+    without one). 'Fit' fits a saturation curve, y = A*P/(P + P_half) (y_0 + A*P/(P +
+    P_half) for intensities), to each set (to the means with 'repeats'), or none; the
+    rows above the plot give A, P_half as a fraction and in mW, and the share of A reached
+    at full power. values.tsv adds drive_V, power_fraction, power_mW_cal, and y_fit,
+    records.csv the first three, and 'Export: Power EPS' writes powdep.eps.
+
 Error bars ('Error bars' in the main window; error_bars in phase.txt)
     noise floor  +/-1 sigma of each record from the noise of its own spectrum: the
                  points outside the intensity window (the whole spectrum if there is
@@ -258,7 +274,7 @@ from collections import OrderedDict
 import numpy as np
 import matplotlib
 from matplotlib.figure import Figure
-from matplotlib.ticker import FuncFormatter, MaxNLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator, FixedLocator, FixedFormatter, NullLocator
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 try:
@@ -304,6 +320,7 @@ def read_run(path):
                     "d1": None,
                     "t": None,
                     "target": None,
+                    "volt": None,
                 }
             except ValueError:
                 continue
@@ -325,6 +342,8 @@ def read_run(path):
                     pass
                 if row["t"] is not None and row["t"] != row["t"]:      # nan
                     row["t"] = None
+            if meta.get("type") == "powdep":    # power dependence: the drive voltage, not D1
+                row["volt"], row["d1"] = row["d1"], None
             rows.append(row)
     return meta, rows, ended
 
@@ -752,7 +771,7 @@ def default_phase():
             "show_integral": False, "fid_n": 4, "fid_fit": False, "show_fid_phase": False,
             "fit_model": "mono", "log_d1": False, "normalize": False,
             "error_bars": "none", "noise_from": None, "noise_to": None, "fit_sigma": False,
-            "s_eq": None, "flip_deg": None}
+            "s_eq": None, "flip_deg": None, "sqrt_power": False}
 
 
 def phase_active(ph):
@@ -764,7 +783,8 @@ def phase_key(ph):
     return proc_key(ph) + (bool(ph.get("show_integral")), bool(ph.get("show_fid_phase")),
                            ph.get("fit_model", "mono"), bool(ph.get("log_d1")), bool(ph.get("normalize")),
                            ph.get("error_bars", "none"), ph.get("noise_from"), ph.get("noise_to"),
-                           bool(ph.get("fit_sigma")), ph.get("s_eq"), ph.get("flip_deg"))
+                           bool(ph.get("fit_sigma")), ph.get("s_eq"), ph.get("flip_deg"),
+                           bool(ph.get("sqrt_power")))
 
 
 def proc_key(ph):
@@ -919,7 +939,8 @@ def phase_file_path(runpath):
 def eps_path(runpath, buildup=False):
     """profile.eps (buildup.eps; decay.eps with buildup='decay') next to run.txt, or <run file
     without .txt>_profile.eps."""
-    name = "decay.eps" if buildup == "decay" else "buildup.eps" if buildup else "profile.eps"
+    name = ("decay.eps" if buildup == "decay" else "powdep.eps" if buildup == "powdep"
+            else "buildup.eps" if buildup else "profile.eps")
     if is_run_folder_layout(runpath):
         return os.path.join(os.path.dirname(runpath), name)
     return (runpath[:-4] if runpath.endswith(".txt") else runpath) + "_" + name
@@ -981,7 +1002,7 @@ def read_phase_file(path):
     ph["fid_n"] = max(1, min(FID_HEAD, int(num("fid_points", 4))))
     ph["fid_fit"] = bool(int(num("fid_fit", 0)))
     ph["show_fid_phase"] = bool(int(num("show_fid_phase", 0)))
-    if vals.get("fit_model") in FIT_MODELS:
+    if vals.get("fit_model") in FIT_MODELS or vals.get("fit_model") in POWDEP_MODELS:
         ph["fit_model"] = vals["fit_model"]
     ph["log_d1"] = bool(int(num("log_d1", 0)))
     ph["normalize"] = bool(int(num("normalize", 0)))
@@ -992,6 +1013,7 @@ def read_phase_file(path):
     ph["fit_sigma"] = bool(int(num("fit_sigma", 0)))
     ph["s_eq"] = num("s_eq", None)
     ph["flip_deg"] = num("flip_deg", None)
+    ph["sqrt_power"] = bool(int(num("sqrt_power", 0)))
     if "window_width" in vals:
         ph["win_set"] = True
         ph["center"] = num("window_center", None)
@@ -1022,7 +1044,8 @@ def write_phase_file(path, ph, runpath):
         "# error_bars: none, noise (noise floor; noise_from/noise_to in ppm, none =\n"
         "# outside the window) or repeats; fit_sigma = 1 weights build-up fits by 1/sigma^2.\n"
         "# Decay runs: s_eq fixes the equilibrium level (none = fitted); flip_deg overrides the\n"
-        "# flip angle in the run file.\n"
+        "# flip angle in the run file. Power-dependence runs: fit_model saturation or none;\n"
+        "# sqrt_power = 1 plots against the square root of the power.\n"
         "# fs_rephase.py (TopSpin)\n"
         "# applies the phase to the TopSpin data; everything else stays in the viewer.\n"
         "ph0 = %s\nph1 = %s\npivot_ppm = %s\nbase_phc0 = %s\nbase_phc1 = %s\n"
@@ -1030,7 +1053,7 @@ def write_phase_file(path, ph, runpath):
         "fid_points = %d\nfid_fit = %d\nshow_fid_phase = %d\n"
         "fit_model = %s\nlog_d1 = %d\nnormalize = %d\n"
         "error_bars = %s\nnoise_from = %s\nnoise_to = %s\nfit_sigma = %d\n"
-        "s_eq = %s\nflip_deg = %s\n%s"
+        "s_eq = %s\nflip_deg = %s\nsqrt_power = %d\n%s"
         % (run_label(runpath), time.strftime("%Y-%m-%d %H:%M:%S"),
            v(ph["ph0"]), v(ph["ph1"]), v(ph["pivot"]), v(ph["base0"]), v(ph["base1"]),
            1 if ph["baseline"] else 0, int(ph["order"]), 1 if ph["magnitude"] else 0,
@@ -1038,7 +1061,8 @@ def write_phase_file(path, ph, runpath):
            1 if ph.get("fid_fit") else 0, 1 if ph.get("show_fid_phase") else 0,
            ph.get("fit_model", "mono"), 1 if ph.get("log_d1") else 0, 1 if ph.get("normalize") else 0,
            ph.get("error_bars", "none"), v(ph.get("noise_from")), v(ph.get("noise_to")),
-           1 if ph.get("fit_sigma") else 0, v(ph.get("s_eq")), v(ph.get("flip_deg")), window))
+           1 if ph.get("fit_sigma") else 0, v(ph.get("s_eq")), v(ph.get("flip_deg")),
+           1 if ph.get("sqrt_power") else 0, window))
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         fh.write(text)
@@ -2068,6 +2092,370 @@ def write_decay_eps(path, a, aspect=None):
         save_eps_for_illustrator(fig, path)
 
 
+# --------------------------------------------------------------------------
+# Power-dependence runs: the enhancement against the mm-wave power at one frequency
+# --------------------------------------------------------------------------
+POWDEP_FULL_V = 0.4                    # full drive (MAX_AWG_VOLTAGE in fs_core.py)
+POWDEP_MODELS = OrderedDict([("saturation", "saturation curve"), ("none", "no fit")])
+POWDEP_SHORT = {"saturation": "saturation", "none": "none"}
+POWDEP_H_RANGE = (1e-3, 1e3)           # P_half is searched in this range (fractions of full power)
+
+
+def powdep_model(name):
+    return name if name in POWDEP_MODELS else "saturation"
+
+
+def powdep_formula(offset, ascii_only=False):
+    if ascii_only:
+        return ("y_0 + " if offset else "") + "A*P/(P + P_half)"
+    return ("y₀ + " if offset else "") + "A·P/(P + P½)"
+
+
+def mono_slopes(xs, ys):
+    """Slopes at the points for a monotone piecewise-cubic (Fritsch-Carlson, as PCHIP)
+    interpolation of increasing data; the same as in fs_core.py."""
+    n = len(xs)
+    h = [xs[i + 1] - xs[i] for i in range(n - 1)]
+    d = [(ys[i + 1] - ys[i]) / h[i] for i in range(n - 1)]
+    if n == 2:
+        return [d[0], d[0]]
+    m = [d[0]] + [0.0] * (n - 2) + [d[-1]]
+    for i in range(1, n - 1):
+        if d[i - 1] * d[i] > 0:
+            w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    return m
+
+
+def mono_interp(xs, ys, m, x):
+    """The interpolant through (xs, ys) with slopes m at x (xs[0] <= x <= xs[-1])."""
+    i = 0
+    while i < len(xs) - 2 and x > xs[i + 1]:
+        i += 1
+    h = xs[i + 1] - xs[i]
+    t = (x - xs[i]) / h
+    return ((2 * t ** 3 - 3 * t ** 2 + 1) * ys[i] + (t ** 3 - 2 * t ** 2 + t) * h * m[i]
+            + (-2 * t ** 3 + 3 * t ** 2) * ys[i + 1] + (t ** 3 - t ** 2) * h * m[i + 1])
+
+
+def read_power_cal(path):
+    """(freq_GHz or None, [V], [mW]) from awg_power_cal.txt ('mV mW' per line, optionally
+    'freq_GHz = <GHz>'; '#' starts a comment)."""
+    freq, pts = None, []
+    with open(path) as fh:
+        for line in fh:
+            body = line.split("#", 1)[0].strip()
+            if not body:
+                continue
+            m = re.match(r"freq_GHz\s*=\s*(\S+)$", body)
+            if m:
+                freq = float(m.group(1))
+                continue
+            parts = body.replace(",", " ").split()
+            if len(parts) != 2:
+                raise ValueError("line '%s' is not 'mV mW'" % body)
+            pts.append((float(parts[0]) / 1000.0, float(parts[1])))
+    pts.sort()
+    return freq, [p[0] for p in pts], [p[1] for p in pts]
+
+
+def power_cal(meta):
+    """The source calibration of a power-dependence run: {"freq", "v", "p", "m", "p_full",
+    "full_v", "source"} from cal_mV and cal_mW in run.txt, else from awg_power_cal.txt next
+    to this file; None if neither can be used."""
+    try:
+        full_v = float(meta.get("full_power_V", POWDEP_FULL_V))
+    except ValueError:
+        full_v = POWDEP_FULL_V
+    try:
+        pts = sorted(zip([float(x) / 1000.0 for x in meta["cal_mV"].split(",")],
+                         [float(x) for x in meta["cal_mW"].split(",")]))
+        f = meta.get("cal_freq_GHz", "none").strip()
+        freq = None if f in ("", "none") else float(f)
+        source = "run.txt"
+    except (KeyError, ValueError):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "awg_power_cal.txt")
+        try:
+            freq, vs, ps = read_power_cal(path)
+        except (OSError, ValueError):
+            return None
+        pts, source = list(zip(vs, ps)), path
+    vs, ps = [p[0] for p in pts], [p[1] for p in pts]
+    if len(vs) < 2 or vs[-1] < full_v - 1e-9 or any(
+            not (vs[i] > vs[i - 1] and ps[i] > ps[i - 1]) for i in range(1, len(vs))):
+        return None
+    cal = {"freq": freq, "v": vs, "p": ps, "m": mono_slopes(vs, ps), "full_v": full_v, "source": source}
+    cal["p_full"] = mono_interp(vs, ps, cal["m"], full_v)
+    return cal
+
+
+def cal_power(cal, v):
+    """Source power (mW, at the calibration frequency) at drive voltage v; None outside the
+    calibration."""
+    if v is None or not cal["v"][0] - 1e-9 <= v <= cal["v"][-1] + 1e-9:
+        return None
+    return mono_interp(cal["v"], cal["p"], cal["m"], min(max(v, cal["v"][0]), cal["v"][-1]))
+
+
+def cal_text(cal, ascii_only=False):
+    """'0.4 V = 59.6 mW at 526.012 GHz'."""
+    return "%g V = %.3g mW%s" % (cal["full_v"], cal["p_full"],
+                                 (" at %.3f GHz" % cal["freq"]) if cal["freq"] is not None else "")
+
+
+def fit_saturation(x, y, w, offset=False, absolute=False):
+    """Least-squares fit of y = [y_0 +] A*x/(x + h) with weights w (x: fraction of full
+    power). A and y_0 are linear; h is searched on a log grid within POWDEP_H_RANGE and then
+    refined. Standard errors from the Jacobian, scaled by the residual variance (or not, if
+    absolute: w = 1/sigma^2). Returns a dict (see the end)."""
+    x, y, w = np.asarray(x, float), np.asarray(y, float), np.asarray(w, float)
+    n, npar = x.size, (3 if offset else 2)
+    if n < npar + 1:
+        raise ValueError("%d points; the fit needs at least %d" % (n, npar + 1))
+    if np.min(x) <= 0:
+        raise ValueError("a power of zero or below")
+    sw = np.sqrt(w)
+
+    def amps(h):
+        f = x / (x + h)
+        B = np.column_stack(([np.ones(n)] if offset else []) + [f])
+        coef = np.linalg.lstsq(B * sw[:, None], y * sw, rcond=None)[0]
+        r = y - B.dot(coef)
+        return coef, float(np.sum(w * r * r))
+    lo, hi = math.log(POWDEP_H_RANGE[0]), math.log(POWDEP_H_RANGE[1])
+    grid = np.linspace(lo, hi, 121)
+    costs = [amps(math.exp(g))[1] for g in grid]
+    i = int(np.argmin(costs))
+    a_, b_ = grid[max(i - 1, 0)], grid[min(i + 1, grid.size - 1)]
+    g = 0.5 * (math.sqrt(5.0) - 1.0)
+    c_, d_ = b_ - g * (b_ - a_), a_ + g * (b_ - a_)
+    fc, fd = amps(math.exp(c_))[1], amps(math.exp(d_))[1]
+    for _ in range(80):
+        if fc < fd:
+            b_, d_, fd = d_, c_, fc
+            c_ = b_ - g * (b_ - a_)
+            fc = amps(math.exp(c_))[1]
+        else:
+            a_, c_, fc = c_, d_, fd
+            d_ = a_ + g * (b_ - a_)
+            fd = amps(math.exp(d_))[1]
+    lh = 0.5 * (a_ + b_)
+    h = math.exp(lh)
+    coef, cost = amps(h)
+    y0 = float(coef[0]) if offset else 0.0
+    A = float(coef[-1])
+    J = np.column_stack(([np.ones(n)] if offset else []) + [x / (x + h), -A * x / (x + h) ** 2])
+    dof = n - npar
+    chi2 = cost / dof if dof > 0 else None
+    s2 = 1.0 if absolute else (chi2 if chi2 else 0.0)
+    try:
+        cov = np.linalg.inv((J * w[:, None]).T.dot(J)) * s2
+        err = [math.sqrt(v) if v >= 0 else float("nan") for v in np.diag(cov)]
+    except np.linalg.LinAlgError:
+        err = [float("nan")] * npar
+    e_y0 = err[0] if offset else None
+    eA, eh = err[-2], err[-1]
+    notes, why = [], ""
+    if lh <= lo + 0.05:
+        why = "already level at the lowest power (P_half below %g of full power)" % POWDEP_H_RANGE[0]
+    elif lh >= hi - 0.05:
+        why = "no levelling off within the powers measured (linear in P)"
+    elif not (np.isfinite(eh) and np.isfinite(eA)):
+        why = "the standard errors could not be computed"
+    elif eh > h:
+        notes.append("P_half poorly determined (error larger than the value)")
+    if h > np.max(x) and not why:
+        notes.append("P_half above the highest power measured: the asymptote is an extrapolation")
+    return {"offset": offset, "A": A, "eA": eA, "h": h, "eh": eh, "y0": y0, "ey0": e_y0,
+            "full_frac": 1.0 / (1.0 + h), "e_full_frac": eh / (1.0 + h) ** 2 if np.isfinite(eh) else None,
+            "determined": not why, "why": why, "notes": notes, "chi2_red": chi2,
+            "absolute": absolute, "n": n}
+
+
+def powdep_value(f, x):
+    """The fitted curve at fractions x."""
+    x = np.asarray(x, float)
+    return f["y0"] + f["A"] * x / (x + f["h"])
+
+
+def powdep_view(results, errm):
+    """{(name, set): {"x" (fraction of full power), "y", "e", "ns", "n", "recs"}} of the ON
+    records with a power; with errm 'repeats' one series ('mean', 0) of the means over the
+    records at the same drive voltage."""
+    on = [r for r in results if r["kind"] == "ON" and r["y"] is not None and r.get("pfrac") is not None]
+    out = OrderedDict()
+    if errm == "repeats":
+        g = repeat_means(on, "pfrac", "y")
+        if g:
+            out[("mean", 0)] = {"x": [q["x"] for q in g], "y": [q["y"] for q in g], "e": [q["e"] for q in g],
+                                "ns": [q["ns"] for q in g], "n": [q["n"] for q in g],
+                                "recs": [q["recs"] for q in g]}
+        return out
+    for s in sorted(set(r["set"] for r in on)):
+        pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["pfrac"])
+        out[("set", s)] = {"x": [r["pfrac"] for r in pts], "y": [r["y"] for r in pts],
+                           "e": [r.get("ey") for r in pts],
+                           "ns": [r["ns"] if r["ns"] else r["ns_run"] for r in pts],
+                           "n": [1] * len(pts), "recs": [[r] for r in pts]}
+    return out
+
+
+def powdep_fits(view, model, fit_sigma, offset):
+    """{key: fit_saturation result, or {"error": text}}; weights as for buildup_fits."""
+    fits = OrderedDict()
+    if model == "none":
+        return fits
+    for key, v in view.items():
+        e = v["e"]
+        use_sigma = fit_sigma and all(x is not None and x > 0 for x in e)
+        rough = key[1] == 0 and min(v["n"]) < 3
+        try:
+            if use_sigma and not rough:
+                f = fit_saturation(v["x"], v["y"], [1.0 / x ** 2 for x in e], offset, absolute=True)
+                if f["chi2_red"] is not None and f["chi2_red"] > 3:
+                    f["notes"].append("scatter about %.2g times the error bars (chi2/dof %.3g)"
+                                      % (math.sqrt(f["chi2_red"]), f["chi2_red"]))
+            else:
+                f = fit_saturation(v["x"], v["y"], v["ns"], offset)
+                if fit_sigma:
+                    f["notes"].append("weighted by NS: %s" % (
+                        "fewer than 3 records at some power, too few for weights from their spread" if rough
+                        else "not every point has an error bar"))
+            fits[key] = f
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError, OverflowError) as ex:
+            fits[key] = {"error": str(ex)}
+    return fits
+
+
+def powdep_series_name(key, multi):
+    if key[1] == 0:
+        return "mean"
+    return ("set %d" % key[1]) if multi else "fit"
+
+
+def powdep_summary(f, cal, ascii_only=False):
+    """One line: asymptote, P_half (fraction and mW), the share reached at full power."""
+    pm = (lambda v, e: fmt_pm(v, e).replace("±", "+/-")) if ascii_only else fmt_pm
+    if not f["determined"]:
+        return "not determined: " + f["why"]
+    parts = []
+    if f["offset"]:
+        parts.append("%s %s" % ("y_0" if ascii_only else "y₀", pm(f["y0"], f["ey0"])))
+    parts.append("A %s" % pm(f["A"], f["eA"]))
+    half = "%s %s of full power" % ("P_half" if ascii_only else "P½", pm(f["h"], f["eh"]))
+    if cal is not None:
+        half += " (%s mW%s)" % (pm(f["h"] * cal["p_full"], f["eh"] * cal["p_full"] if f["eh"] == f["eh"] else None),
+                                (" at %.3f GHz" % cal["freq"]) if cal["freq"] is not None else "")
+    parts.append(half)
+    parts.append("full power reaches %.0f%% of A" % (100.0 * f["full_frac"]))
+    if f.get("absolute") and f["chi2_red"] is not None:
+        parts.append("%s %.3g" % ("chi2/dof" if ascii_only else "χ²/dof", f["chi2_red"]))
+    return ("; " if ascii_only else " · ").join(parts)
+
+
+def powdep_xlabel(a, compact=False):
+    cal = a.get("power_cal")
+    if cal is None:
+        return "AWG drive voltage (V)"
+    where = (" at %.3f GHz" % cal["freq"]) if cal["freq"] is not None else ""
+    first = "sqrt(P / P_full)" if a.get("sqrt_power") else "fraction of full power, P / P_full"
+    return "%s;  below: P in mW (calibration%s)" % (first, where)
+
+
+def powdep_axes(ax, a, bottom_ax=None, compact=False, ascii_only=False):
+    """Axes of a power-dependence plot: the drive voltage of each point along the top of ax
+    (a secondary axis, returned in a list), and the power in mW under each tick of the
+    bottom axis (bottom_ax, default ax)."""
+    cal = a.get("power_cal")
+    if cal is None:
+        return []
+    bottom_ax = bottom_ax or ax
+    sq = a.get("sqrt_power")
+
+    def tick(x, pos=None):
+        p = (x * x if sq else x) * cal["p_full"]
+        return "%g\n%.3g mW" % (round(x, 6), p) if x > 0 else "%g\n0 mW" % round(x, 6)
+    bottom_ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
+    bottom_ax.xaxis.set_major_formatter(FuncFormatter(tick))
+    out = []
+    pts = sorted(set((round(r["px"], 6), r["volt"]) for r in a["results"]
+                     if r["kind"] == "ON" and r.get("px") is not None and r.get("volt") is not None))
+    if pts:
+        top = ax.secondary_xaxis("top", functions=(lambda x: x, lambda x: x))
+        top.xaxis.set_major_locator(FixedLocator([p[0] for p in pts]))
+        top.xaxis.set_major_formatter(FixedFormatter(["%.3f" % p[1] for p in pts]))
+        top.xaxis.set_minor_locator(NullLocator())
+        top.tick_params(labelsize=7 if compact else 8, rotation=90 if len(pts) > 8 else 0)
+        top.set_xlabel("AWG drive (V)", fontsize=8 if compact else 9)
+        out.append(top)
+    return out
+
+
+def plot_powdep_fits(ax, a, lw=1.2, ascii_only=False):
+    """The fitted curves (in the axis units: fraction or its square root). Returns the artists."""
+    arts = []
+    fits = a.get("fits") or {}
+    if not fits:
+        return arts
+    multi = len(fits) > 1
+    xmax = max([1.0] + [r["pfrac"] for r in a["results"] if r.get("pfrac") is not None])
+    xf = np.linspace(0.0, xmax * 1.02, 300)
+    xp = np.sqrt(xf) if a.get("sqrt_power") else xf
+    for i, (key, f) in enumerate(fits.items()):
+        if "error" in f:
+            continue
+        col = SET_COLORS[(i if key[1] else 0) % len(SET_COLORS)]
+        label = ("%s, %s %.2g" % (powdep_series_name(key, multi) if multi or key[1] == 0 else "fit",
+                                  "P_half" if ascii_only else "P½", f["h"])
+                 if f["determined"] else None)
+        arts += ax.plot(xp, powdep_value(f, xf), "-" if f["determined"] else ":", color=col, lw=lw,
+                        label=label, zorder=1.5)
+    return arts
+
+
+def powdep_info_rows(a, ascii_only=False):
+    """Rows (key, text, warn) for the window (ascii_only: for the lines above plot.png): the
+    power axis and the fits."""
+    rows = []
+    cal = a.get("power_cal")
+    meta = a["meta"]
+    if cal is None:
+        rows.append(("Warning", "no usable power calibration (cal_mV/cal_mW in run.txt or awg_power_cal.txt): "
+                     "plotted against the drive voltage, no fit", True))
+        return rows
+    txt = ["x: %s of the power at %s" % ("square root of the fraction" if a.get("sqrt_power") else "fraction",
+                                          cal_text(cal)),
+           "calibration from %s" % ("the run file" if cal["source"] == "run.txt" else cal["source"])]
+    try:
+        f_run = float(meta.get("freq_GHz", "nan"))
+    except ValueError:
+        f_run = float("nan")
+    if cal["freq"] is not None and f_run == f_run and abs(f_run - cal["freq"]) > 5e-4:
+        txt.append("run at %.3f GHz: the fraction is taken to hold there, the mW only at %.3f GHz"
+                   % (f_run, cal["freq"]))
+    rows.append(("Power", ("; " if ascii_only else " · ").join(txt), False))
+    unc = [r for r in a["results"] if r["kind"] == "ON" and r.get("volt") is not None and r.get("pfrac") is None]
+    if unc:
+        rows.append(("Warning", "%d record(s) outside the calibration (e.g. expno %d, %.3f V): not plotted"
+                     % (len(unc), unc[0]["expno"], unc[0]["volt"]), True))
+    model = a.get("fit_model")
+    if model == "none":
+        return rows
+    fits = a.get("fits") or {}
+    multi = len(fits) > 1
+    for key, f in fits.items():
+        name = "Fit" if not multi else "Fit %s" % powdep_series_name(key, multi)
+        if "error" in f:
+            rows.append((name, "no fit: %s" % f["error"], True))
+            continue
+        line = powdep_summary(f, cal, ascii_only)
+        if f["notes"]:
+            notes = "; ".join(f["notes"])
+            line += "; " + notes if ascii_only else " · " + notes.replace("P_half", "P½").replace("chi2/dof", "χ²/dof")
+        rows.append((name, line if ascii_only else line.replace("P_half", "P½"), not f["determined"]))
+    return rows
+
+
 def planned_records(runpath):
     """[(expno, expected s)] of a build-up from settings.txt in the run folder, or None."""
     if not is_run_folder_layout(runpath):
@@ -2139,7 +2527,7 @@ class Analyzer:
     def set_display(self, **flags):
         """Sets display-only settings (show_integral, show_fid_phase; for build-ups fit_model,
         log_d1, normalize) and saves them. Returns an error text or ''."""
-        bools = ("show_integral", "show_fid_phase", "log_d1", "normalize", "fit_sigma")
+        bools = ("show_integral", "show_fid_phase", "log_d1", "normalize", "fit_sigma", "sqrt_power")
         self.phase = dict(self.phase, **dict((k, bool(v) if k in bools else v) for k, v in flags.items()))
         try:
             write_phase_file(self.phase_path, self.phase, self.runpath)
@@ -2302,6 +2690,7 @@ class Analyzer:
         skey = proc_key(ph)
         buildup = meta.get("type") == "buildup"
         decay = meta.get("type") == "decay"
+        powdep = meta.get("type") == "powdep"
         errm = ph.get("error_bars", "none")
         region = None
         if ph.get("noise_from") is not None and ph.get("noise_to") is not None \
@@ -2398,6 +2787,24 @@ class Analyzer:
             for r in results:
                 r["y"] = r["value"] if r.get("t") is not None else None
                 r["yi"] = None
+        # x of the profile plot: the frequency, or for a power dependence the fraction of full
+        # power (or its square root) from the calibration (the drive voltage without one)
+        cal = power_cal(meta) if powdep else None
+        if powdep and ph.get("fit_model") not in POWDEP_MODELS:     # e.g. the default 'mono'
+            ph["fit_model"] = self.phase["fit_model"] = "saturation"
+        sqrt_p = powdep and cal is not None and bool(ph.get("sqrt_power"))
+        for r in results:
+            r["pmw"] = r["pfrac"] = None
+            if not powdep:
+                r["px"] = r["freq"]
+                continue
+            if cal is None:
+                r["px"] = r.get("volt")
+                continue
+            r["pmw"] = cal_power(cal, r.get("volt"))
+            if r["pmw"] is not None:
+                r["pfrac"] = r["pmw"] / cal["p_full"]
+            r["px"] = None if r["pfrac"] is None else (math.sqrt(r["pfrac"]) if sqrt_p else r["pfrac"])
         # sigma of y and yi from the noise floor (ratio to the start OFF of the set)
         for r in results:
             r["ey"] = r["eyi"] = None
@@ -2428,6 +2835,9 @@ class Analyzer:
         if decay:
             fits = decay_fits(decay_view(results, errm), decay_model(ph.get("fit_model", "mono")),
                               bool(ph.get("fit_sigma")) and errm != "none", ph.get("s_eq"), flip)
+        if powdep and cal is not None:
+            fits = powdep_fits(powdep_view(results, errm), powdep_model(ph.get("fit_model")),
+                               bool(ph.get("fit_sigma")) and errm != "none", not use_enh)
 
         latest = None
         readable = [r for r in results if r["readable"]]
@@ -2449,7 +2859,9 @@ class Analyzer:
                 "show_fid_phase": bool(ph.get("show_fid_phase")), "need_fid": need_fid,
                 "fid_ref": fid_ref, "latest_fid": latest_fid, "plan": run_plan(self.runpath),
                 "buildup": buildup, "fits": fits,
-                "fit_model": decay_model(ph.get("fit_model", "mono")) if decay else ph.get("fit_model", "mono"),
+                "fit_model": decay_model(ph.get("fit_model", "mono")) if decay else
+                powdep_model(ph.get("fit_model")) if powdep else ph.get("fit_model", "mono"),
+                "powdep": powdep, "power_cal": cal, "sqrt_power": sqrt_p,
                 "decay": decay, "flip_deg": flip, "s_eq_fixed": ph.get("s_eq"),
                 "error_bars": errm, "noise_region": region,
                 "fit_sigma": bool(ph.get("fit_sigma")) and errm != "none",
@@ -2538,6 +2950,15 @@ class Analyzer:
             for row, r in zip(rows, a["results"]):
                 row[6:6] = ["" if r.get("t") is None else "%.3f" % r["t"],
                             "" if r.get("target") is None else "%g" % r["target"]]
+        if a.get("powdep"):                      # drive voltage and power after the frequency
+            cols[5:5] = ["drive_V", "power_fraction", "power_mW_cal"]
+            for row, r in zip(rows, a["results"]):
+                row[5:5] = ["" if r.get("volt") is None else "%.3f" % r["volt"],
+                            "" if r.get("pfrac") is None else "%.5f" % r["pfrac"],
+                            "" if r.get("pmw") is None else "%.4g" % r["pmw"]]
+            if a.get("power_cal") is not None:
+                head.append("power_fraction: power at drive_V / power at %s; power_mW_cal: from the "
+                            "calibration (%s)" % (cal_text(a["power_cal"]), a["power_cal"]["source"]))
         if a.get("error_bars") == "noise":       # noise-floor sigmas at the end
             cols += ["noise_sigma_point_per_scan", "sigma_value", "sigma_integral"]
             head.append("noise_sigma_point_per_scan: noise of one spectrum point; sigma_value: of the "
@@ -2730,7 +3151,11 @@ def profile_info(a, runpath):
             meas.append("window integral also plotted")
     if a.get("error_bars", "none") != "none":
         meas.append(error_text(a))
+    if a.get("powdep") and a.get("power_cal") is not None and a.get("fit_model") != "none":
+        meas.append("fit: %s, %s, ± 1 standard error" % (powdep_formula(not a["use_enh"]), fit_weight_text(a)))
     rows.append(("Measure", " · ".join(meas), False))
+    if a.get("powdep"):
+        rows += powdep_info_rows(a)
     unit = "per NS·RG" if fidm else "per scan"
     offs = [r for r in res if r["kind"] == "OFF"]
     set_ids = sorted(set(r["set"] for r in offs))
@@ -2906,10 +3331,32 @@ def write_tsv(path, a):
         em = a.get("error_bars", "none")
         if em != "none":
             fh.write("# %s\n" % error_text(a, ascii_only=True))
+        powdep = a.get("powdep")
+        cal = a.get("power_cal")
+        if powdep:
+            if cal is not None:
+                fh.write("# power_fraction: power at drive_V / power at %s; power_mW_cal: from the calibration "
+                         "(%s)\n" % (cal_text(cal), cal["source"]))
+            if a.get("fits"):
+                fh.write("# fit: y = %s, P = power_fraction, %s; +/- 1 standard error\n"
+                         % (powdep_formula(not a["use_enh"], True), fit_weight_text(a, True)))
+            for key, f in (a.get("fits") or {}).items():
+                name = powdep_series_name(key, len(a["fits"]) > 1) if (len(a["fits"]) > 1 or key[1] == 0) else "result"
+                fh.write("# fit %s: %s\n" % (name, ("no fit: " + f["error"]) if "error" in f else
+                                             powdep_summary(f, cal, True) + "".join("; " + n for n in f["notes"])))
         extra = {"none": "", "noise": "\tsigma_per_scan\ty_sigma\tintegral_sigma\ty_integral_sigma",
                  "repeats": "\ty_mean\ty_sem\tn_repeats"}[em]
-        fh.write("expno\tkind\tlabel\tfreq_GHz\tns\tintensity_per_scan\tppm_of_point\ty\tnote\tset"
-                 "\tintegral_per_scan\ty_integral%s\n" % extra)
+        fh.write("expno\tkind\tlabel\tfreq_GHz\t%sns\tintensity_per_scan\tppm_of_point\ty\tnote\tset"
+                 "\tintegral_per_scan\ty_integral%s%s\n"
+                 % ("drive_V\tpower_fraction\tpower_mW_cal\t" if powdep else "", extra,
+                    "\ty_fit" if powdep and a.get("fits") else ""))
+        fitted = {}
+        for key, f in (a.get("fits") or {}).items():
+            if "error" in f or not powdep:
+                continue
+            for r in a["results"]:
+                if r["kind"] == "ON" and r.get("pfrac") is not None and (key[1] == 0 or r["set"] == key[1]):
+                    fitted[r["expno"]] = float(powdep_value(f, [r["pfrac"]])[0])
         groups = profile_means(dict(a, show_integral=False))[0] if em == "repeats" else []
         for r in a["results"]:
             extra = ""
@@ -2920,9 +3367,16 @@ def write_tsv(path, a):
                 m = [q for q in groups if r in q["recs"]]
                 extra = ("\t%.6g\t%s\t%d" % (m[0]["y"], "" if m[0]["e"] is None else "%.4g" % m[0]["e"],
                                               m[0]["n"])) if m else "\t\t\t"
-            fh.write("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s%s\n" % (
+            pcols = ""
+            if powdep:
+                pcols = "%s\t%s\t%s\t" % ("" if r.get("volt") is None else "%.3f" % r["volt"],
+                                           "" if r.get("pfrac") is None else "%.5f" % r["pfrac"],
+                                           "" if r.get("pmw") is None else "%.4g" % r["pmw"])
+                if a.get("fits"):
+                    extra += "\t" + ("%.6g" % fitted[r["expno"]] if r["expno"] in fitted else "")
+            fh.write("%d\t%s\t%s\t%s\t%s%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s%s\n" % (
                 r["expno"], r["kind"], r["label"],
-                "-" if r["freq"] is None else "%.4f" % r["freq"],
+                "-" if r["freq"] is None else "%.4f" % r["freq"], pcols,
                 r["ns"] if r["ns"] is not None else r["ns_run"],
                 "" if r["value"] is None else "%.6g" % r["value"],
                 "" if r["at"] is None else "%.2f" % r["at"],
@@ -2999,6 +3453,8 @@ def record_what(r, multi):
         what = "reference (MW on)" if r["kind"] == "ON" else "t %.0f s" % r["t"]
     elif r.get("d1") is not None:
         what = "%s, D1 %g s" % (r["kind"], r["d1"])
+    elif r.get("volt") is not None and r["kind"] == "ON":
+        what = "ON %.3f V" % r["volt"] + ((", %.2f of full power" % r["pfrac"]) if r.get("pfrac") is not None else "")
     else:
         what = ("ON %.3f GHz" % r["freq"]) if r["kind"] == "ON" else ("OFF %s" % r["label"])
     return ("set %d, %s" % (r["set"], what)) if multi else what
@@ -3050,17 +3506,18 @@ def draw_fid_record(ax, fid, n, fit, title):
 
 
 def draw_fid_phase(ax3, a, compact=False):
-    """Phase panel: FID phase of the ON records relative to their median, against frequency."""
-    on = [r for r in a["results"] if r["kind"] == "ON" and r["freq"] is not None
+    """Phase panel: FID phase of the ON records relative to their median, against frequency
+    (or power)."""
+    on = [r for r in a["results"] if r["kind"] == "ON" and r.get("px") is not None
           and r["fid"] and r["fid"]["phase_rel"] is not None]
     if on:
         sets = sorted(set(r["set"] for r in on))
         for i, s in enumerate(sets):
-            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["freq"])
-            ax3.plot([r["freq"] for r in pts], [r["fid"]["phase_rel"] for r in pts], "-o",
+            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["px"])
+            ax3.plot([r["px"] for r in pts], [r["fid"]["phase_rel"] for r in pts], "-o",
                      color=SET_COLORS[i % len(SET_COLORS)], ms=4 if len(pts) < 150 else 2.5, lw=1.0)
         latest = max(on, key=lambda r: r["expno"])
-        ax3.plot([latest["freq"]], [latest["fid"]["phase_rel"]], "o", color="#c0392b", ms=7, zorder=3)
+        ax3.plot([latest["px"]], [latest["fid"]["phase_rel"]], "o", color="#c0392b", ms=7, zorder=3)
     else:
         ax3.text(0.5, 0.5, "no FID phase (see the lines above the profile)", transform=ax3.transAxes,
                  ha="center", va="center", color="0.4")
@@ -3069,7 +3526,7 @@ def draw_fid_phase(ax3, a, compact=False):
         ax3.set_title("FID phase (deg), relative to the median of the ON records", loc="left", fontsize=8)
     else:
         ax3.set_ylabel("FID phase (deg)", fontsize=9)
-    ax3.set_xlabel("mm-wave frequency (GHz)")
+    ax3.set_xlabel(powdep_xlabel(a, compact) if a.get("powdep") else "mm-wave frequency (GHz)")
     ax3.grid(True, color="0.9")
 
 
@@ -3085,10 +3542,11 @@ def error_bars(ax, recs, xkey, ykey, ekey, color, lw=0.9, scale=1.0):
 
 
 def profile_means(a):
-    """Means over the sets at each frequency: (peak or FID(t0) groups, integral groups)."""
-    on = [r for r in a["results"] if r["kind"] == "ON" and r["y"] is not None and r["freq"] is not None]
-    g = repeat_means(on, "freq", "y", nd=4)
-    gi = repeat_means([r for r in on if r.get("yi") is not None], "freq", "yi", nd=4) \
+    """Means over the sets at each frequency (power, for a power dependence): (peak or FID(t0)
+    groups, integral groups)."""
+    on = [r for r in a["results"] if r["kind"] == "ON" and r["y"] is not None and r.get("px") is not None]
+    g = repeat_means(on, "px", "y", nd=4)
+    gi = repeat_means([r for r in on if r.get("yi") is not None], "px", "yi", nd=4) \
         if a["show_integral"] else []
     return g, gi
 
@@ -3104,8 +3562,8 @@ def draw_profile_repeats(ax1, ax_int, a, ms=5, lw=1.2, latest=True):
     what = ("FID(t0)" if a["fid_mode"] else "peak") if a["show_integral"] else ""
     label = "mean of %d sets%s" % (nsets, (", " + what) if what else "")
     arts = error_bars(ax1, [{"x": q["x"], "y": q["y"], "e": q["e"]} for q in g], "x", "y", "e", col)
-    arts += ax1.plot([q["x"] for q in g], [q["y"] for q in g], "-o", color=col,
-                     ms=ms if len(g) < 150 else 3, lw=lw, label=label)
+    arts += ax1.plot([q["x"] for q in g], [q["y"] for q in g], "o" if a.get("powdep") and a.get("fits") else "-o",
+                     color=col, ms=ms if len(g) < 150 else 3, lw=lw, label=label)
     on = [r for q in g for r in q["recs"]]
     if latest and on:
         r = max(on, key=lambda q: q["expno"])
@@ -3163,6 +3621,12 @@ def draw_latest(ax2, a):
 def draw(p, a, runpath):
     """p: Panels. ax1b, the twin of ax1 (right-hand axis), takes the integral when
     intensities are plotted."""
+    for ax in getattr(p, "sec_axes", []):        # secondary axes of a power dependence
+        try:
+            ax.remove()
+        except (ValueError, AttributeError, KeyError):
+            pass
+    p.sec_axes = []
     if a.get("buildup"):
         return draw_buildup(p, a, runpath)
     if a.get("decay"):
@@ -3181,29 +3645,32 @@ def draw(p, a, runpath):
     multi = a["multi_set"]
     show_i = a["show_integral"]
     fidm = a["fid_mode"]
-    on = [r for r in res if r["kind"] == "ON" and r["y"] is not None]
+    powdep = a.get("powdep")
+    on = [r for r in res if r["kind"] == "ON" and r["y"] is not None and r.get("px") is not None]
 
     # Profile, one series per set; with show_i also the integral of the window
     errm = a.get("error_bars", "none")
+    if on and powdep:                            # fitted curves first, so that the legend has them
+        plot_powdep_fits(ax1, a)
     if on and errm == "repeats":                 # the mean over the sets, with its standard error
         draw_profile_repeats(ax1, ax1 if a["use_enh"] else ax1b, a)
     elif on:
         sets = sorted(set(r["set"] for r in on))
         for i, s in enumerate(sets):
-            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["freq"])
+            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["px"])
             if multi:
                 label = ("set %d, %s" % (s, "FID(t0)" if fidm else "peak")) if show_i else ("set %d" % s)
             elif fidm:
                 label = "FID(t0)" if show_i else None
             else:
                 label = ("peak (%s)" % a["mode"]) if show_i else None
-            ax1.plot([r["freq"] for r in pts], [r["y"] for r in pts], "-o",
+            ax1.plot([r["px"] for r in pts], [r["y"] for r in pts], "o" if powdep and a.get("fits") else "-o",
                      color=SET_COLORS[i % len(SET_COLORS)], ms=5 if len(pts) < 150 else 3, lw=1.2,
                      label=label)
             if errm == "noise":
-                error_bars(ax1, pts, "freq", "y", "ey", SET_COLORS[i % len(SET_COLORS)])
+                error_bars(ax1, pts, "px", "y", "ey", SET_COLORS[i % len(SET_COLORS)])
         latest = max(on, key=lambda r: r["expno"])
-        ax1.plot([latest["freq"]], [latest["y"]], "o", color="#c0392b", ms=8, zorder=3)
+        ax1.plot([latest["px"]], [latest["y"]], "o", color="#c0392b", ms=8, zorder=3)
         if show_i:
             target = ax1 if a["use_enh"] else ax1b
             if target is ax1b:
@@ -3211,21 +3678,21 @@ def draw(p, a, runpath):
                 ax1b.set_ylabel("integral per scan (a.u. x ppm)")
             ion = [r for r in on if r.get("yi") is not None]
             for i, s in enumerate(sets):
-                pts = sorted([r for r in ion if r["set"] == s], key=lambda r: r["freq"])
+                pts = sorted([r for r in ion if r["set"] == s], key=lambda r: r["px"])
                 if pts:
-                    target.plot([r["freq"] for r in pts], [r["yi"] for r in pts], "--s",
+                    target.plot([r["px"] for r in pts], [r["yi"] for r in pts], "--s",
                                 color=SET_COLORS[i % len(SET_COLORS)], mfc="none", ms=4, lw=1.0,
                                 label=("set %d, integral" % s) if multi else "integral")
                     if errm == "noise":
-                        error_bars(target, pts, "freq", "yi", "eyi", SET_COLORS[i % len(SET_COLORS)])
+                        error_bars(target, pts, "px", "yi", "eyi", SET_COLORS[i % len(SET_COLORS)])
             if ion:
                 li = max(ion, key=lambda r: r["expno"])
-                target.plot([li["freq"]], [li["yi"]], "s", color="#c0392b", mfc="none", ms=8, zorder=3)
-        xs = set(r["freq"] for r in on)
-        if len(xs) == 1:
+                target.plot([li["px"]], [li["yi"]], "s", color="#c0392b", mfc="none", ms=8, zorder=3)
+        xs = set(r["px"] for r in on)
+        if len(xs) == 1 and not powdep:
             x0 = xs.pop()
             ax1.set_xlim(x0 - 0.005, x0 + 0.005)
-        if multi or show_i:
+        if multi or show_i or (powdep and a.get("fits")):
             h, l = ax1.get_legend_handles_labels()
             if ax1b.get_visible():
                 h2, l2 = ax1b.get_legend_handles_labels()
@@ -3250,7 +3717,7 @@ def draw(p, a, runpath):
         ax1.set_ylabel("FID(t0) / (NS*RG) (a.u.)")
     else:
         ax1.set_ylabel(("peak " if show_i else "") + "intensity per scan (a.u.)")
-    if p.compact:                            # the window: short labels (the OFF expno is above the plot)
+    if p.compact or powdep:                  # the window: short labels (the OFF expno is above the plot)
         if a["use_enh"]:
             ax1.set_ylabel("FID(t0) on/off - 1" if fidm else "I_on / I_off - 1")
         else:
@@ -3258,14 +3725,21 @@ def draw(p, a, runpath):
     if ax3 is not None:
         if not p.compact:                    # shorter profile axes: label on two lines
             lab = ax1.get_ylabel().replace("   (", "\n(")
+            if powdep:                       # shorter still, under the drive-voltage axis
+                lab = lab.split("\n")[0]
             ax1.set_ylabel(lab, fontsize=9)
         draw_fid_phase(ax3, a, p.compact)
         ax1.tick_params(labelbottom=False)
         fig.align_ylabels([ax1, ax3])
     else:
-        ax1.set_xlabel("mm-wave frequency (GHz)")
+        ax1.set_xlabel(powdep_xlabel(a, p.compact) if powdep else "mm-wave frequency (GHz)")
     ax1.ticklabel_format(axis="x", useOffset=False)
     ax1.grid(True, color="0.9")
+    if powdep:                                   # from zero power; the voltages on top, mW below
+        xmax = max([1.0 if a.get("power_cal") is not None else POWDEP_FULL_V] + [r["px"] for r in on])
+        ax1.set_xlim(0.0, xmax * 1.04)
+        if on:
+            p.sec_axes = powdep_axes(ax1, a, bottom_ax=ax3, compact=p.compact)
 
     # OFF records, phase and problems, shown above the profile
     lines = []
@@ -3299,6 +3773,12 @@ def draw(p, a, runpath):
         lines.append("start OFF not available: plotting intensity per scan")
     if errm != "none":
         lines.append(error_text(a, ascii_only=True))
+    if powdep:
+        if a["use_enh"]:
+            lines.append("y: I_on/I_off - 1 per %s, with the start OFF of %s"
+                         % ("NS*RG" if fidm else "scan", "each set" if multi else "the set"))
+        for key, row, warn in powdep_info_rows(a, ascii_only=True):
+            lines.append("%s: %s" % (key, row))
     lines.extend(phase_status(a))
     bad = [r for r in res if r["kind"] == "ON" and r["value"] is None
            and not (fidm and r["fid"]["read"] and r["fid"]["g"] is None)]   # listed by fid_status
@@ -3607,9 +4087,10 @@ def write_profile_eps(path, a, aspect=None):
     if a.get("decay"):
         return write_decay_eps(path, a, aspect)
     from matplotlib.backends.backend_ps import FigureCanvasPS
-    on = [r for r in a["results"] if r["kind"] == "ON" and r["y"] is not None and r["freq"] is not None]
+    on = [r for r in a["results"] if r["kind"] == "ON" and r["y"] is not None and r.get("px") is not None]
     if not on:
         raise ValueError("no ON record with a value yet")
+    powdep = a.get("powdep")
     multi, show_i, fidm = a["multi_set"], a["show_integral"], a["fid_mode"]
     with_ph = a["show_fid_phase"] and any(r["fid"] and r["fid"]["phase_rel"] is not None for r in on)
     with matplotlib.rc_context(EPS_RC):
@@ -3625,27 +4106,29 @@ def write_profile_eps(path, a, aspect=None):
         ax_i = ax1.twinx() if show_i and not a["use_enh"] else ax1
         lines = []
         errm = a.get("error_bars", "none")
+        if powdep:
+            lines += plot_powdep_fits(ax1, a, lw=1.0, ascii_only=True)
         if errm == "repeats":
             lines += draw_profile_repeats(ax1, ax_i, a, ms=4, lw=1.0, latest=False)
             ax1.get_legend().remove()
         for i, s in enumerate(sorted(set(r["set"] for r in on)) if errm != "repeats" else []):
             col = SET_COLORS[i % len(SET_COLORS)]
-            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["freq"])
+            pts = sorted([r for r in on if r["set"] == s], key=lambda r: r["px"])
             name = ("FID(t0)" if fidm else "peak") if show_i else None
             label = (("set %d, %s" % (s, name)) if name else ("set %d" % s)) if multi else name
-            lines += ax1.plot([r["freq"] for r in pts], [r["y"] for r in pts], "-o", color=col,
-                              ms=4, lw=1.0, label=label)
+            lines += ax1.plot([r["px"] for r in pts], [r["y"] for r in pts],
+                              "o" if powdep and a.get("fits") else "-o", color=col, ms=4, lw=1.0, label=label)
             if errm == "noise":
-                lines += error_bars(ax1, pts, "freq", "y", "ey", col, lw=0.8)
+                lines += error_bars(ax1, pts, "px", "y", "ey", col, lw=0.8)
             if show_i:
                 ip = [r for r in pts if r.get("yi") is not None]
-                lines += ax_i.plot([r["freq"] for r in ip], [r["yi"] for r in ip], "--s", color=col, mfc="none",
+                lines += ax_i.plot([r["px"] for r in ip], [r["yi"] for r in ip], "--s", color=col, mfc="none",
                                    ms=4, lw=0.8, label=("set %d, integral" % s) if multi else "integral")
                 if errm == "noise":
-                    lines += error_bars(ax_i, ip, "freq", "yi", "eyi", col, lw=0.8)
+                    lines += error_bars(ax_i, ip, "px", "yi", "eyi", col, lw=0.8)
             if ax3 is not None:
                 pp = [r for r in pts if r["fid"] and r["fid"]["phase_rel"] is not None]
-                lines += ax3.plot([r["freq"] for r in pp], [r["fid"]["phase_rel"] for r in pp], "-o",
+                lines += ax3.plot([r["px"] for r in pp], [r["fid"]["phase_rel"] for r in pp], "-o",
                                   color=col, ms=3, lw=0.8)
         if a["use_enh"]:
             lines.append(ax1.axhline(0.0, color="0.6", lw=0.6, zorder=0))
@@ -3654,7 +4137,7 @@ def write_profile_eps(path, a, aspect=None):
             ax1.set_ylabel("FID(t0) / (NS*RG) (a.u.)" if fidm else "intensity per scan (a.u.)")
         if ax_i is not ax1:
             ax_i.set_ylabel("integral per scan (a.u. x ppm)")
-        if multi or show_i or errm == "repeats":
+        if multi or show_i or errm == "repeats" or (powdep and a.get("fits")):
             h, l = ax1.get_legend_handles_labels()
             if ax_i is not ax1:
                 h2, l2 = ax_i.get_legend_handles_labels()
@@ -3662,13 +4145,18 @@ def write_profile_eps(path, a, aspect=None):
             ax1.legend(h, l, fontsize=8, frameon=False, loc="best")
         ax1.ticklabel_format(axis="x", useOffset=False)
         ax1.xaxis.set_major_locator(MaxNLocator(nbins=8))     # frequencies have 6-7 characters
+        xlab = powdep_xlabel(a) if powdep else "mm-wave frequency (GHz)"
         if ax3 is not None:
             lines.append(ax3.axhline(0.0, color="0.6", lw=0.6, zorder=0))
             ax3.set_ylabel("FID phase (deg)")
-            ax3.set_xlabel("mm-wave frequency (GHz)")
+            ax3.set_xlabel(xlab)
             ax1.tick_params(labelbottom=False)
         else:
-            ax1.set_xlabel("mm-wave frequency (GHz)")
+            ax1.set_xlabel(xlab)
+        if powdep:
+            ax1.set_xlim(0.0, max([1.0 if a.get("power_cal") is not None else POWDEP_FULL_V]
+                                  + [r["px"] for r in on]) * 1.04)
+            powdep_axes(ax1, a, bottom_ax=ax3, ascii_only=True)
         for ln in lines:
             ln.set_clip_on(False)
         fig.tight_layout()
@@ -3825,6 +4313,8 @@ def record_label(r, multi):
         s += "reference" if r["kind"] == "ON" else "t %.0f s" % r["t"]
     elif r.get("d1") is not None:
         s += "%s  D1 %g s" % (r["kind"], r["d1"])
+    elif r["kind"] == "ON" and r.get("volt") is not None:
+        s += "ON %.3f V" % r["volt"]
     elif r["kind"] == "ON" and r["freq"] is not None:
         s += "ON %.3f GHz" % r["freq"]
     else:
@@ -3951,9 +4441,10 @@ class MainWindow:
             rtype = read_run(runpath)[0].get("type")
         except Exception:
             rtype = None
-        self.buildup, self.decay = rtype == "buildup", rtype == "decay"
+        self.buildup, self.decay, self.powdep = rtype == "buildup", rtype == "decay", rtype == "powdep"
         self.curve = self.buildup or self.decay       # fitted curves instead of a profile
-        self.models = list(DECAY_MODELS) if self.decay else list(FIT_MODELS)
+        self.models = (list(DECAY_MODELS) if self.decay else list(POWDEP_MODELS) if self.powdep
+                       else list(FIT_MODELS))
         self.root = tk.Tk()
         self.root.title("fs_plot - %s  |  %s" % (run_label(runpath), reopen))
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -3996,6 +4487,17 @@ class MainWindow:
             self.norm_var = tk.IntVar(value=0)
             ttk.Checkbutton(bar, text="normalized", variable=self.norm_var,
                             command=self.on_buildup_axes).pack(side=tk.LEFT, padx=(8, 0))
+        if self.powdep:                          # saturation fit and the power axis
+            ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
+            ttk.Label(bar, text="Fit:").pack(side=tk.LEFT)
+            self.fit_combo = ttk.Combobox(bar, state="readonly", width=10,
+                                          values=[POWDEP_SHORT[k] for k in self.models])
+            self.fit_combo.pack(side=tk.LEFT, padx=(6, 0))
+            self.fit_combo.current(0)
+            self.fit_combo.bind("<<ComboboxSelected>>", self.on_fit_model)
+            self.sqrt_var = tk.IntVar(value=0)
+            ttk.Checkbutton(bar, text="√P", variable=self.sqrt_var,
+                            command=self.on_sqrt_power).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
         ttk.Label(bar, text="Error bars:").pack(side=tk.LEFT)
         self.err_combo = ttk.Combobox(bar, state="readonly", width=10, values=list(ERROR_MODES.values()))
@@ -4004,7 +4506,8 @@ class MainWindow:
         self.err_combo.bind("<<ComboboxSelected>>", self.on_error_mode)
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
         ttk.Label(bar, text="Export:").pack(side=tk.LEFT)
-        ttk.Button(bar, text="Decay EPS" if self.decay else "Build-up EPS" if self.buildup else "Profile EPS",
+        ttk.Button(bar, text="Decay EPS" if self.decay else "Build-up EPS" if self.buildup
+                   else "Power EPS" if self.powdep else "Profile EPS",
                    command=self.save_eps).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(bar, text="CSV", width=5, command=self.export_csv).pack(side=tk.LEFT, padx=(4, 0))
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
@@ -4253,6 +4756,10 @@ class MainWindow:
                     self.flip_note.configure(text="° (empty: %s° from the run file)" % a["meta"].get("flip_deg", "5"))
                 self.logd1_var.set(1 if ph.get("log_d1") else 0)
                 self.norm_var.set(1 if ph.get("normalize") else 0)
+            if self.powdep:
+                ph = self.analyzer.phase
+                self.fit_combo.current(self.models.index(powdep_model(ph.get("fit_model"))))
+                self.sqrt_var.set(1 if ph.get("sqrt_power") else 0)
             self.spec.sync(a, phase_changed == "proc", self.selected_row())
             # Live: off from the start for a run that has ended; off when the run ends
             if a["ended"] is None:
@@ -4387,13 +4894,13 @@ class MainWindow:
             return
         best, dmin = None, 30.0                # pixels
         for r in a["results"]:
-            if r["kind"] != "ON" or r["freq"] is None:
+            if r["kind"] != "ON" or r.get("px") is None:
                 continue
             for ax, key in targets:
                 y = (r["fid"] or {}).get("phase_rel") if key == "phase" else r.get(key)
                 if y is None:
                     continue
-                xp, yp = ax.transData.transform((r["freq"], y))
+                xp, yp = ax.transData.transform((r["px"], y))
                 d = math.hypot(xp - event.x, yp - event.y)
                 if d < dmin:
                     best, dmin = r, d
@@ -4457,7 +4964,7 @@ class MainWindow:
                                                     ("D1", "sets, or a repeated D1") if self.buildup else
                                                     ("frequency", "sets")))
             self.noise_box.pack_forget()
-        if self.curve:
+        if self.curve or self.powdep:
             self.fitsig_cb.pack(side=tk.LEFT, padx=(16, 0))
         if not self.errrow_shown:
             self.errrow.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(0, 2), after=self.bar)
@@ -4557,19 +5064,24 @@ class MainWindow:
                                                normalize=bool(self.norm_var.get())))
         self.refresh(reschedule=False)
 
+    def on_sqrt_power(self):
+        self.set_msg(self.analyzer.set_display(sqrt_power=bool(self.sqrt_var.get())))
+        self.refresh(reschedule=False)
+
     def on_fid_phase(self):
         self.set_msg(self.analyzer.set_display(show_fid_phase=bool(self.fph_var.get())))
         self.refresh(reschedule=False)
 
     def save_eps(self):
-        path = eps_path(self.runpath, "decay" if self.decay else self.buildup)
+        path = eps_path(self.runpath, "decay" if self.decay else "powdep" if self.powdep else self.buildup)
         w = self.canvas.get_tk_widget()
         aspect = w.winfo_height() / float(max(1, w.winfo_width()))
         try:
             write_profile_eps(path, self.last_a, aspect)
             self.set_msg("Wrote %s (%.1f x %.1f in, the %s as shown, for Adobe Illustrator)"
                          % (path, EPS_WIDTH, min(5.0, max(2.0, EPS_WIDTH * aspect)),
-                            "decay" if self.decay else "build-up" if self.buildup else "profile"), error=False)
+                            "decay" if self.decay else "build-up" if self.buildup else
+                            "power dependence" if self.powdep else "profile"), error=False)
         except Exception as ex:
             self.set_msg("Could not write %s: %s" % (path, ex))
 
