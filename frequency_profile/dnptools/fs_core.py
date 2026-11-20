@@ -146,8 +146,9 @@ dataset, or the path of an expno folder in another, uses that OFF record as the
 reference for I_on/I_off instead of the start OFF of each set (OFF records that the
 run acquires itself, OFF_MODE, then only check the drift). Before the run, its
 processed spectrum is checked for, and its RG, pulse length, power, and pulse
-program are compared with the template's, and its D1 with the run's; a difference is
-shown as a warning in the confirmation dialog. run.txt has '# off_ref = <expno folder>'.
+program (from its acqus, the parameters it was acquired with) are compared with the
+template's current ones (its acqu, which the new records get), and its D1 with the
+run's; a difference is shown as a warning in the confirmation dialog. run.txt has '# off_ref = <expno folder>'.
 """
 import math
 import os
@@ -1753,6 +1754,19 @@ def acqus_values(path):
     return out
 
 
+def acq_file_values(folder, prefer):
+    """acqus_values() of folder/prefer ('acqu' or 'acqus'), else of the other file; {} if
+    neither can be read. acqu holds an expno's current parameters (what wrpa copies and zg
+    uses), acqus those of its last acquisition."""
+    other = "acqus" if prefer == "acqu" else "acqu"
+    for name in (prefer, other):
+        try:
+            return acqus_values(os.path.join(folder, name))
+        except CATCH:
+            pass
+    return {}
+
+
 def acq_number(acq, key, index=None):
     """A number from acqus_values(); None if missing."""
     try:
@@ -1776,23 +1790,27 @@ def off_ref_check(off_ref, ds_root, template_dir, d1):
     if not os.path.exists(os.path.join(path, "pdata", "1", "1r")):
         raise ValueError("%s has no processed spectrum (pdata/1/1r); process it first" % path)
     try:
-        ra = acqus_values(os.path.join(path, "acqus"))
+        ra = acqus_values(os.path.join(path, "acqus"))        # what the reference was acquired with
     except CATCH as ex:
         raise ValueError("the acqus of %s could not be read (%s)" % (path, ex))
-    try:
-        ta = acqus_values(os.path.join(template_dir, "acqus"))
-    except CATCH:
-        ta = {}
-    warn = []
+    ru = acq_file_values(path, "acqu")
+    ta = acq_file_values(template_dir, "acqu")   # what the new records get (the template's acqus is
+    warn = []                                    # its last acquisition, possibly with older settings)
+
+    def differ(x, y):
+        return abs(x - y) > 1e-6 * max(abs(x), abs(y), 1e-12)
     for key, idx, name, unit in (("RG", None, "RG", ""), ("D", 1, "D1", " s"), ("P", 1, "P1", " us"),
                                  ("PLW", 1, "PLW1", " W")):
         rv, tv = acq_number(ra, key, idx), acq_number(ta, key, idx)
         own = key == "D" and d1 is not None
         if own:
             tv = d1                              # the D1 this run sets, not the template's
-        if rv is not None and tv is not None and abs(rv - tv) > 1e-6 * max(abs(rv), abs(tv), 1e-12):
-            warn.append("%s %g%s in the reference, %g%s %s" % (name, rv, unit, tv, unit,
-                                                               "set for this run" if own else "in the template"))
+        if rv is not None and tv is not None and differ(rv, tv):
+            uv = acq_number(ru, key, idx)
+            note = "" if uv is None or not differ(uv, rv) else \
+                " (its acqus; its acqu has %g%s)" % (uv, unit)
+            warn.append("%s %g%s in the reference%s, %g%s %s" % (name, rv, unit, note, tv, unit,
+                                                                 "set for this run" if own else "in the template"))
     if ra.get("PULPROG") and ta.get("PULPROG") and ra["PULPROG"] != ta["PULPROG"]:
         warn.append("pulse program %s in the reference, %s in the template" % (ra["PULPROG"], ta["PULPROG"]))
     desc = "expno %s of %s: %s, NS %s, RG %s, D1 %s s" % (
@@ -1889,9 +1907,9 @@ def run_records(c, job, source):
         fail("the template expno %s/%d does not exist." % (ds_root, TEMPLATE_EXPNO))
         return
 
-    def acqus_param(expno, key):
+    def acqus_param(expno, key, name="acqus"):
         try:
-            fh = open(os.path.join(ds_root, str(expno), "acqus"), "r")
+            fh = open(os.path.join(ds_root, str(expno), name), "r")
             try:
                 txt = fh.read()
             finally:
@@ -1902,7 +1920,7 @@ def run_records(c, job, source):
         except CATCH:
             pass
         return ""
-    tmpl_pulprog = acqus_param(TEMPLATE_EXPNO, "PULPROG")
+    tmpl_pulprog = acqus_param(TEMPLATE_EXPNO, "PULPROG", "acqu") or acqus_param(TEMPLATE_EXPNO, "PULPROG")
 
     # ---- OFF reference from an earlier run (OFF_REF) ---------------------------------
     off_ref_path, off_ref_rows, off_ref_warn = None, [], []

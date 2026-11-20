@@ -339,9 +339,11 @@ if asked; with a reference they serve as drift checks and are listed as a
 multiple of the reference.
 
 Before the run, the script checks that the record has a processed spectrum
-(`pdata/1/1r`) and compares its RG, P1, PLW1, and pulse program with the
-template's, and its D1 with the run's `D1`; a difference appears as a warning in
-the confirmation dialog, which can still be accepted. An OFF record taken with
+(`pdata/1/1r`) and compares the RG, P1, PLW1, and pulse program it was acquired
+with (its `acqus`) with the template's current ones (its `acqu`, which the new
+records get), and its D1 with the run's `D1`; a difference appears as a warning
+in the confirmation dialog, which can still be accepted. If the reference's own
+`acqu` disagrees with its `acqus`, the warning gives both. An OFF record taken with
 another D1 or receiver gain does not give the enhancement. `run.txt` has
 `# off_ref = <expno folder>`.
 
