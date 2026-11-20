@@ -128,6 +128,26 @@ voltage, and fs, bu, and decay refuse a POWER above it. Voltages below the lowes
 calibration point are refused, since their power is not known. run.txt has
 '# type = powdep', the calibration used, and an eighth column with the drive
 voltage (V).
+
+Chirp grids (TopSpin script chirp2d.py): 'chirp2d p1' runs chirp2d_p1.py, 'chirp2d'
+alone lists the chirp2d_*.py files, and chirp2d_template.py is the template. Per set:
+an optional OFF, one CW record at FREQ (CW_RECORD), one ON record per chirp of the
+grid WIDTHS_MHZ x TIMES_US, and an optional OFF. A chirp record is sent
+'chirp FREQ <width MHz> <time us> <shape> POWER' (shape I, D, V or IV, as the AWG
+server reads it), the CW record 'cw FREQ POWER'. RATE_RANGE keeps only the chirps
+whose sweep rate (width/time, twice that for V and IV) lies in it, and ORDER
+'center_out' acquires them from the rate closest to RATE_CENTER outwards (so a run
+cut short has the chirps of most interest), 'grid' row by row. run.txt has
+'# type = chirp2d', the grid, the chirps in acquisition order ('# chirps'), and two
+more columns, width (MHz) and time (us).
+
+OFF reference from another run (fs, powdep, chirp2d): OFF_REF = an expno of this
+dataset, or the path of an expno folder in another, uses that OFF record as the
+reference for I_on/I_off instead of the start OFF of each set (OFF records that the
+run acquires itself, OFF_MODE, then only check the drift). Before the run, its
+processed spectrum is checked for, and its RG, pulse length, power, and pulse
+program are compared with the template's, and its D1 with the run's; a difference is
+shown as a warning in the confirmation dialog. run.txt has '# off_ref = <expno folder>'.
 """
 import math
 import os
@@ -181,6 +201,7 @@ SETTINGS = [
     ("TEMPLATE_EXPNO",   None),       # None = the expno open in TopSpin
     ("REPEATS",          1),
     ("OFF_MODE",         "both"),     # "start", "end", "both" or "none"
+    ("OFF_REF",          None),       # expno (or expno folder) of an earlier OFF record
     ("FREQS",            REQUIRED),   # list of frequencies (GHz), in acquisition order
     ("D1",               REQUIRED),
     ("DS",               0),
@@ -284,6 +305,7 @@ POWDEP_SETTINGS = [
     ("TEMPLATE_EXPNO",   None),
     ("REPEATS",          1),
     ("OFF_MODE",         "both"),     # "start", "end", "both" or "none"
+    ("OFF_REF",          None),       # expno (or expno folder) of an earlier OFF record
     ("FREQ",             REQUIRED),   # GHz, for every ON record
     ("VOLTAGES",         None),       # AWG drive voltages (V), in acquisition order; or
     ("POWER_FRACTIONS",  None),       # fractions of the power at full drive, in acquisition order
@@ -307,6 +329,55 @@ POWDEP_SETTINGS = [
     ("LAUNCH_VIEWER",    True),
     ("RESPAWN_VIEWER",   True),
 ]
+
+
+# Chirp grids (chirp2d.py): chirp width x chirp time at one centre frequency
+CHIRP2D_SETTINGS = [
+    ("RUN_LABEL",        REQUIRED),   # default: chirp2d_<name> of chirp2d_<name>.py
+    ("SAMPLE",           ""),
+    ("MAS_INFO",         ""),
+    ("DATA_DIR",         ""),
+    ("DATA_NAME",        ""),
+    ("START_EXPNO",      REQUIRED),
+    ("TEMPLATE_EXPNO",   None),
+    ("REPEATS",          1),
+    ("OFF_MODE",         "none"),     # "start", "end", "both" or "none"
+    ("OFF_REF",          None),       # expno (or expno folder) of an earlier OFF record
+    ("FREQ",             REQUIRED),   # GHz, centre of every chirp and the CW frequency
+    ("POWER",            0.4),        # AWG drive voltage (V) for the chirps and the CW record
+    ("WIDTHS_MHZ",       REQUIRED),   # chirp widths (MHz, at the output), each > 0
+    ("TIMES_US",         REQUIRED),   # chirp times (us), each > 0
+    ("CHIRP_SHAPE",      "I"),        # I increasing, D decreasing, V, IV inverted V
+    ("RATE_RANGE",       None),       # (lo, hi) MHz/us: only the chirps with a rate in it
+    ("ORDER",            "center_out"),   # "center_out" (from RATE_CENTER) or "grid"
+    ("RATE_CENTER",      10.0),       # MHz/us
+    ("CW_RECORD",        True),       # one CW record per set, before the chirps
+    ("D1",               REQUIRED),
+    ("DS",               0),
+    ("ON_SCANS",         1),
+    ("OFF_SCANS",        1),
+    ("AWG_SETTLE",       5),
+    ("SCAN_OVERHEAD",    5),
+    ("POLL_INTERVAL",    5),
+    ("MAX_EXTRA_WAIT",   300),
+    ("POST_ACQ_PAD",     5),
+    ("EST_OVERHEAD",     5),
+    ("AWG_RETRIES",      3),
+    ("MAX_CONSEC_SKIPS", 3),
+    ("PROCESS_CMDS",     ["efp", "absn"]),
+    ("PEAK_PPM",         None),
+    ("PEAK_WINDOW_PPM",  10.0),
+    ("INTENSITY_MODE",   "extreme"),
+    ("LAUNCH_VIEWER",    True),
+    ("RESPAWN_VIEWER",   True),
+]
+CHIRP_SHAPES = {"I": "increasing", "D": "decreasing", "V": "V-shaped", "IV": "inverted V"}
+
+
+def chirp_rate(width, t, shape):
+    """Sweep rate (MHz/us) of a chirp: width/time, twice that for V and IV (the span is
+    swept twice per chirp)."""
+    return (2.0 if shape in ("V", "IV") else 1.0) * width / t
 
 
 def frange(start, stop, step):
@@ -450,7 +521,8 @@ def check_power(fail, name, v):
 
 def kind_hint(S, cmd):
     """For an error box: the command the settings S look written for, if not cmd."""
-    for name, keys, what in (("powdep", ("VOLTAGES", "POWER_FRACTIONS"), "power-dependence"),
+    for name, keys, what in (("chirp2d", ("WIDTHS_MHZ", "TIMES_US", "CHIRP_SHAPE"), "chirp-grid"),
+                             ("powdep", ("VOLTAGES", "POWER_FRACTIONS"), "power-dependence"),
                              ("decay", ("TIMES_LIST", "POLARIZE_TIME"), "decay"),
                              ("bu", ("D1_LIST", "SERIES", "NS_LIST"), "build-up"),
                              ("fs", ("FREQS", "PROFILE_NS"), "frequency-profile")):
@@ -539,6 +611,11 @@ def run_decay_settings(args=None):
 def run_powdep_settings(args=None):
     """Entry point of powdep.py. args: the words after 'powdep' on TopSpin's command line."""
     run_from_args(args, "powdep", "powdep_", "powdep_", run_powdep)
+
+
+def run_chirp2d_settings(args=None):
+    """Entry point of chirp2d.py. args: the words after 'chirp2d' on TopSpin's command line."""
+    run_from_args(args, "chirp2d", "chirp2d_", "chirp2d_", run_chirp2d)
 
 
 def run_from_args(args, cmd, prefix, label_prefix, runner):
@@ -1414,6 +1491,316 @@ def run_powdep(S, source=None):
         "end_desc": "%d set(s), OFF mode %s" % (REPEATS, OFF_MODE)}, source)
 
 
+def run_chirp2d(S, source=None):
+    """Runs the chirp grid described by the settings dict S: per set an optional OFF, one CW
+    record, one ON record per chirp (width x time), an optional OFF."""
+    # ---- Settings ------------------------------------------------------------
+    c = check_settings(S, CHIRP2D_SETTINGS, kind_hint(S, "chirp2d"))
+    if c is None:
+        return
+    RUN_LABEL        = str(c["RUN_LABEL"]).strip()
+    SAMPLE           = c["SAMPLE"]
+    MAS_INFO         = c["MAS_INFO"]
+    REPEATS          = c["REPEATS"]
+    OFF_MODE         = str(c["OFF_MODE"]).strip().lower()
+    D1               = c["D1"]
+    DS               = c["DS"]
+    ON_SCANS         = c["ON_SCANS"]
+    OFF_SCANS        = c["OFF_SCANS"]
+    INTENSITY_MODE   = str(c["INTENSITY_MODE"]).strip().lower()
+    SHAPE            = str(c["CHIRP_SHAPE"]).strip().upper()
+    ORDER            = str(c["ORDER"]).strip().lower()
+    CW_RECORD        = bool(c["CW_RECORD"])
+    fail = failer(RUN_LABEL)
+    h = html_text
+
+    if not re.match(r"^[A-Za-z0-9_-]+$", RUN_LABEL):
+        fail("RUN_LABEL may contain only letters, digits, '-' and '_' (got '%s')." % RUN_LABEL)
+        return
+    if OFF_MODE not in ("start", "end", "both", "none"):
+        fail("OFF_MODE must be 'start', 'end', 'both' or 'none' (got '%s')." % OFF_MODE)
+        return
+    if INTENSITY_MODE not in ("extreme", "max", "sum"):
+        fail("INTENSITY_MODE must be 'extreme', 'max' or 'sum' (got '%s')." % INTENSITY_MODE)
+        return
+    if not isinstance(REPEATS, int) or REPEATS < 1:
+        fail("REPEATS must be a positive integer.")
+        return
+    if SHAPE not in CHIRP_SHAPES:
+        fail("CHIRP_SHAPE must be one of %s (got '%s')." % (", ".join(sorted(CHIRP_SHAPES)), c["CHIRP_SHAPE"]))
+        return
+    if ORDER not in ("center_out", "grid"):
+        fail("ORDER must be 'center_out' or 'grid' (got '%s')." % c["ORDER"])
+        return
+    try:
+        FREQ, POWER, RATE_CENTER = float(c["FREQ"]), float(c["POWER"]), float(c["RATE_CENTER"])
+    except CATCH:
+        fail("FREQ (GHz), POWER (V) and RATE_CENTER (MHz/us) must be numbers.")
+        return
+    if not check_power(fail, "POWER", POWER):
+        return
+    if RATE_CENTER <= 0:
+        fail("RATE_CENTER must be above 0 (got %g)." % RATE_CENTER)
+        return
+    grid = {}
+    for name in ("WIDTHS_MHZ", "TIMES_US"):
+        try:
+            vals = [float(x) for x in c[name]]
+        except CATCH:
+            fail("%s must be a list of numbers." % name)
+            return
+        if not vals or [x for x in vals if not x > 0]:
+            fail("%s must be a non-empty list of values above 0 (the CW record is the zero-width point)."
+                 % name)
+            return
+        if len(set(vals)) != len(vals):
+            fail("%s lists a value twice." % name)
+            return
+        grid[name] = sorted(vals)
+    widths, times = grid["WIDTHS_MHZ"], grid["TIMES_US"]
+    rate_lo, rate_hi = 0.0, float("inf")
+    if c["RATE_RANGE"] is not None:
+        try:
+            rate_lo, rate_hi = [float(x) for x in c["RATE_RANGE"]]
+        except CATCH:
+            fail("RATE_RANGE must be None or (lowest, highest) sweep rate in MHz/us.")
+            return
+        if not 0 <= rate_lo < rate_hi:
+            fail("RATE_RANGE must be (lowest, highest) with 0 <= lowest < highest (got %r)." % (c["RATE_RANGE"],))
+            return
+    chirps = [(w, t) for t in times for w in widths if rate_lo <= chirp_rate(w, t, SHAPE) <= rate_hi]
+    if not chirps:
+        fail("No chirp of the grid has a rate within RATE_RANGE %r." % (c["RATE_RANGE"],))
+        return
+    if ORDER == "center_out":
+        chirps.sort(key=lambda p: (round(abs(math.log(chirp_rate(p[0], p[1], SHAPE) / RATE_CENTER)), 9), p[0], p[1]))
+    shape_desc = "%s (%s)" % (SHAPE, CHIRP_SHAPES[SHAPE])
+
+    # ---- Run plan: per set an optional OFF, the CW record, the chirps, an optional OFF -----
+    per_set = []
+    if OFF_MODE in ("start", "both"):
+        per_set.append(("OFF", "start"))
+    if CW_RECORD:
+        per_set.append(("CW", None))
+    for p in chirps:
+        per_set.append(("CHIRP", p))
+    if OFF_MODE in ("end", "both"):
+        per_set.append(("OFF", "end"))
+    records_per_set = len(per_set)
+    n_on_per_set = len(chirps) + (1 if CW_RECORD else 0)
+    n_off_per_set = records_per_set - n_on_per_set
+
+    def set_tag(set_number):
+        return ("set %d | " % set_number) if REPEATS > 1 else ""
+
+    def make_plan(start_expno):
+        plan = []
+        for set_number in range(1, REPEATS + 1):
+            base = start_expno + (set_number - 1) * records_per_set
+            tag = set_tag(set_number)
+            for i in range(records_per_set):
+                kind, val = per_set[i]
+                rec = {"expno": base + i, "set": set_number, "d1": D1, "width": None, "ctime": None}
+                if kind == "OFF":
+                    rec.update({
+                        "kind": "OFF", "label": val, "freq": None, "ns": OFF_SCANS, "awg": "stop",
+                        "title": ("OFF (%s) | %s%s | %s | microwave off | D1 = %s s | %d scans"
+                                  % (val, tag, SAMPLE, MAS_INFO, D1, OFF_SCANS)),
+                        "what": "%sOFF %s" % (tag, val)})
+                elif kind == "CW":
+                    cmdstr = 'cw %.3f %.3f' % (FREQ, POWER)
+                    rec.update({
+                        "kind": "ON", "label": "cw", "freq": FREQ, "ns": ON_SCANS, "awg": cmdstr, "width": 0.0,
+                        "title": ("chirp grid, CW | %s%s | %s | %s | D1 = %s s | %d scan(s)"
+                                  % (tag, SAMPLE, MAS_INFO, cmdstr, D1, ON_SCANS)),
+                        "what": "%sCW" % tag, "skip": "%sCW" % tag, "last": "CW"})
+                else:
+                    w, t = val
+                    cmdstr = 'chirp %.3f %g %g %s %.3f' % (FREQ, w, t, SHAPE, POWER)
+                    rec.update({
+                        "kind": "ON", "label": "chirp", "freq": FREQ, "ns": ON_SCANS, "awg": cmdstr,
+                        "width": w, "ctime": t,
+                        "title": ("chirp grid | %s%s | %s | %s | %g MHz/us | D1 = %s s | %d scan(s)"
+                                  % (tag, SAMPLE, MAS_INFO, cmdstr, chirp_rate(w, t, SHAPE), D1, ON_SCANS)),
+                        "what": "%schirp %g MHz, %g us" % (tag, w, t),
+                        "skip": "%s%g MHz, %g us" % (tag, w, t), "last": "%g MHz, %g us" % (w, t)})
+                plan.append(rec)
+        return plan
+
+    def dialog_rows(plan):
+        def set_line(set_number):
+            recs = [p for p in plan if p["set"] == set_number]
+            parts = []
+            for p in recs:
+                if p["kind"] == "OFF":
+                    parts.append("OFF %d" % p["expno"])
+                elif p["label"] == "cw":
+                    parts.append("CW %d" % p["expno"])
+            ch = [p["expno"] for p in recs if p["label"] == "chirp"]
+            parts.insert(len(parts) - (1 if OFF_MODE in ("end", "both") else 0), "chirps %d&#8211;%d" % (ch[0], ch[-1]))
+            pre = ("set %d: " % set_number) if REPEATS > 1 else ""
+            return pre + ", then ".join(parts)
+
+        shown = list(range(1, REPEATS + 1))
+        if REPEATS > 6:
+            shown = [1, 2, 3, None, REPEATS]
+        plan_html = "<br>".join([("..." if n is None else set_line(n)) for n in shown])
+        order_of = dict((p, i + 1) for i, p in enumerate(chirps))
+        cells = ["<tr><td></td>" + "".join(["<td align='center'><b>%g MHz</b></td>" % w for w in widths]) + "</tr>"]
+        for t in times:
+            row = "<tr><td align='right'><b>%g us</b></td>" % t
+            for w in widths:
+                r = chirp_rate(w, t, SHAPE)
+                if (w, t) in order_of:
+                    row += "<td align='center'>#%d: %.3g</td>" % (order_of[(w, t)], r)
+                else:
+                    row += "<td align='center'><font color='#9a9a9a'>(%.3g)</font></td>" % r
+            cells.append(row + "</tr>")
+        grid_html = ("%d chirps per set, in the order #; each cell: order and sweep rate (MHz/us)%s<br>"
+                     "<table cellpadding='2' cellspacing='0' border='1'>%s</table>"
+                     % (len(chirps), "; grey: outside RATE_RANGE, not acquired" if len(chirps) < len(widths) * len(times)
+                        else "", "".join(cells)))
+        return [("Plan", plan_html),
+                ("mm-wave", "centre %.3f GHz, %s chirps, AWG 'chirp %.3f &lt;width&gt; &lt;time&gt; %s %.3f'%s"
+                 % (FREQ, h(shape_desc), FREQ, SHAPE, POWER,
+                    ("; CW record 'cw %.3f %.3f'" % (FREQ, POWER)) if CW_RECORD else "; no CW record")),
+                ("Grid", grid_html),
+                ("Scans", "ON records NS %d%s; D1 %s s, DS %d"
+                 % (ON_SCANS, (", OFF records NS %d" % OFF_SCANS) if n_off_per_set else "", h(D1), DS))]
+
+    def timing(plan, record_time):
+        per_point_time = record_time(ON_SCANS, D1)
+        off_time       = record_time(OFF_SCANS, D1)
+        total_time     = REPEATS * (per_point_time * n_on_per_set + off_time * n_off_per_set)
+        note = ("ON ~%s per record, OFF ~%s each" % (fmt_dur(per_point_time), fmt_dur(off_time))
+                if n_off_per_set else "~%s per record" % fmt_dur(per_point_time))
+        return total_time, note
+
+    def header(run_id, ds_root, peak_str, started):
+        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+                "# type = chirp2d\n"
+                "# run_id = %s\n"
+                "# label = %s\n"
+                "# sample = %s\n"
+                "# conditions = %s\n"
+                "# dataset_dir = %s\n"
+                "# off_mode = %s\n"
+                "# peak_ppm = %s\n"
+                "# window_ppm = %s\n"
+                "# mode = %s\n"
+                "# freq_GHz = %.4f\n"
+                "# power = %.3f\n"
+                "# shape = %s\n"
+                "# grid_widths_MHz = %s\n"
+                "# grid_times_us = %s\n"
+                "# order = %s\n"
+                "# rate_center = %g\n"
+                "# chirps = %s\n"
+                "# d1 = %s\n"
+                "# repeats = %d\n"
+                "# started = %s\n"
+                "# width_MHz, time_us: of the chirp; the CW record has width 0\n"
+                "# columns: expno, kind, label, freq_GHz, ns, finished, set, width_MHz, time_us\n"
+                % (run_id, RUN_LABEL, SAMPLE, MAS_INFO, ds_root, OFF_MODE, peak_str,
+                   repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, FREQ, POWER, SHAPE,
+                   ",".join(["%g" % w for w in widths]), ",".join(["%g" % t for t in times]),
+                   ORDER, RATE_CENTER, ",".join(["%gx%g" % p for p in chirps]), D1, REPEATS, started))
+
+    def row_extra(rec):
+        if rec["kind"] != "ON":
+            return "\t-\t-"
+        if rec["label"] == "cw":
+            return "\t0\t-"
+        return "\t%g\t%g" % (rec["width"], rec["ctime"])
+
+    run_records(c, {
+        "noun": "chirp grid", "table": CHIRP2D_SETTINGS, "make_plan": make_plan,
+        "dialog_rows": dialog_rows, "timing": timing, "header": header,
+        "used": {"OFF_MODE": OFF_MODE, "FREQ": FREQ, "POWER": POWER, "CHIRP_SHAPE": SHAPE, "ORDER": ORDER,
+                 "WIDTHS_MHZ": widths, "TIMES_US": times},
+        "settings_comments": lambda plan, record_time: [],
+        "row_extra": row_extra,
+        "d1_column": False, "on_noun": "ON records",
+        "start_desc": "%d set(s), OFF mode %s, %d chirps per set at %.3f GHz (%s)%s"
+                      % (REPEATS, OFF_MODE, len(chirps), FREQ, shape_desc, ", with a CW record" if CW_RECORD else ""),
+        "end_desc": "%d set(s), OFF mode %s" % (REPEATS, OFF_MODE)}, source)
+
+
+def acqus_values(path):
+    """{name: value} from a JCAMP acqus file: '##$NAME= value', and for arrays
+    ('##$D= (0..63)' followed by the values) a list of strings."""
+    out = {}
+    fh = open(path, "r")
+    try:
+        lines = fh.read().split("\n")
+    finally:
+        fh.close()
+    i = 0
+    while i < len(lines):
+        m = re.match(r"##\$(\w+)=\s*(.*)$", lines[i])
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if re.match(r"^\(\d+\.\.\d+\)$", val):
+                vals = []
+                i += 1
+                while i < len(lines) and not lines[i].startswith("##"):
+                    vals += lines[i].split()
+                    i += 1
+                out[key] = vals
+                continue
+            out[key] = val.strip("<>")
+        i += 1
+    return out
+
+
+def acq_number(acq, key, index=None):
+    """A number from acqus_values(); None if missing."""
+    try:
+        v = acq[key]
+        if index is not None:
+            v = v[index]
+        return float(v)
+    except CATCH:
+        return None
+
+
+def off_ref_check(off_ref, ds_root, template_dir, d1):
+    """(expno folder, [warnings], description) of OFF_REF (an expno of ds_root, or the path
+    of an expno folder); raises ValueError if it cannot be used. The warnings list the
+    acquisition parameters that differ from the template's, and a D1 that differs from d1
+    (from the template's if d1 is None)."""
+    ref = str(off_ref).strip()
+    path = os.path.join(ds_root, ref) if re.match(r"^\d+$", ref) else os.path.normpath(ref)
+    if not re.match(r"^\d+$", os.path.basename(path)) or not os.path.isdir(path):
+        raise ValueError("%s is not an expno folder" % path)
+    if not os.path.exists(os.path.join(path, "pdata", "1", "1r")):
+        raise ValueError("%s has no processed spectrum (pdata/1/1r); process it first" % path)
+    try:
+        ra = acqus_values(os.path.join(path, "acqus"))
+    except CATCH as ex:
+        raise ValueError("the acqus of %s could not be read (%s)" % (path, ex))
+    try:
+        ta = acqus_values(os.path.join(template_dir, "acqus"))
+    except CATCH:
+        ta = {}
+    warn = []
+    for key, idx, name, unit in (("RG", None, "RG", ""), ("D", 1, "D1", " s"), ("P", 1, "P1", " us"),
+                                 ("PLW", 1, "PLW1", " W")):
+        rv, tv = acq_number(ra, key, idx), acq_number(ta, key, idx)
+        own = key == "D" and d1 is not None
+        if own:
+            tv = d1                              # the D1 this run sets, not the template's
+        if rv is not None and tv is not None and abs(rv - tv) > 1e-6 * max(abs(rv), abs(tv), 1e-12):
+            warn.append("%s %g%s in the reference, %g%s %s" % (name, rv, unit, tv, unit,
+                                                               "set for this run" if own else "in the template"))
+    if ra.get("PULPROG") and ta.get("PULPROG") and ra["PULPROG"] != ta["PULPROG"]:
+        warn.append("pulse program %s in the reference, %s in the template" % (ra["PULPROG"], ta["PULPROG"]))
+    desc = "expno %s of %s: %s, NS %s, RG %s, D1 %s s" % (
+        os.path.basename(path), os.path.dirname(path), ra.get("PULPROG", "?"), ra.get("NS", "?"),
+        ra.get("RG", "?"), ("%g" % acq_number(ra, "D", 1)) if acq_number(ra, "D", 1) is not None else "?")
+    return path, warn, desc
+
+
 def run_records(c, job, source):
     """Acquires the records that job["make_plan"] lists, with the common settings in c
     (see run_profile and run_buildup for job). Each record is made from the template
@@ -1516,6 +1903,25 @@ def run_records(c, job, source):
             pass
         return ""
     tmpl_pulprog = acqus_param(TEMPLATE_EXPNO, "PULPROG")
+
+    # ---- OFF reference from an earlier run (OFF_REF) ---------------------------------
+    off_ref_path, off_ref_rows, off_ref_warn = None, [], []
+    if c.get("OFF_REF") not in (None, ""):
+        try:
+            d1_run = float(c["D1"]) if c.get("D1") is not None else None
+        except CATCH:
+            d1_run = None
+        try:
+            off_ref_path, off_ref_warn, ref_desc = off_ref_check(
+                c["OFF_REF"], ds_root, os.path.join(ds_root, str(TEMPLATE_EXPNO)), d1_run)
+        except ValueError as ex:
+            fail("OFF_REF cannot be used: %s." % ex)
+            return
+        txt = html_text(ref_desc) + "<br>used for I_on/I_off instead of a start OFF"
+        if off_ref_warn:
+            txt += "".join(["<br><font color='#b03a2e'><b>differs:</b> %s</font>" % html_text(w)
+                            for w in off_ref_warn])
+        off_ref_rows = [("OFF reference", txt)]
 
     # ---- Run plan: one dict per record, in acquisition order ---------------------
     plan = job["make_plan"](START_EXPNO)
@@ -1636,7 +2042,7 @@ def run_records(c, job, source):
            grey % h(tmpl_from),
            h(SAMPLE), grey % h(MAS_INFO))
         + "".join(["<tr><td valign='top'><b>%s</b></td><td>%s</td></tr>" % (k, v)
-                   for k, v in job["dialog_rows"](plan)])
+                   for k, v in job["dialog_rows"](plan) + off_ref_rows])
         + "<tr><td valign='top'><b>Time</b></td><td><b>about %s</b>, ending around %s<br>%s</td></tr>"
         "<tr><td valign='top'><b>Records</b></td><td>%s</td></tr>"
         "<tr><td valign='top'><b>Live plot</b></td><td>%s, %s; the viewer %s</td></tr>"
@@ -1714,7 +2120,10 @@ def run_records(c, job, source):
             log("Could not write run file %s [%s]" % (RUN_PATH, ex))
 
     def run_file_header():
-        run_file_write(job["header"](run_id, ds_root, peak_str, now_str()), 'w')
+        text = job["header"](run_id, ds_root, peak_str, now_str())
+        if off_ref_path:
+            text = text.replace("# columns:", "# off_ref = %s\n# columns:" % off_ref_path, 1)
+        run_file_write(text, 'w')
 
     def run_file_row(rec, t_fin):
         if rec["freq"] is None:
@@ -1934,6 +2343,8 @@ def run_records(c, job, source):
         % (RUN_LABEL, DATA_NAME, DATA_DIR, job["start_desc"], START_EXPNO, planned_last,
            fmt_hms(total_time)))
     log("Run folder: %s" % run_dir)
+    if off_ref_path:
+        log("OFF reference: %s%s" % (off_ref_path, "".join(["; differs: " + w for w in off_ref_warn])))
     run_file_header()
     index_event("start", "running")
     log("Viewer command: %s" % viewer_cmd)

@@ -58,6 +58,13 @@ REPEATS     = 1              # sets; each set occupies its own block of expnos
 # (the viewer divides by the start OFF; "both" also shows the drift over the set)
 OFF_MODE = "both"
 
+# An OFF record of an earlier run as the reference for I_on/I_off, instead of the start
+# OFF of each set: an expno of this dataset, or the path of an expno folder (e.g.
+# "/opt/nmrdata/rsh/2611/312"). It must have the same template parameters (RG, D1,
+# pulse); the dialog warns if they differ. OFF records this run acquires (OFF_MODE)
+# then only show the drift.
+OFF_REF = None
+
 FREQ = None                  # GHz, e.g. the frequency of the largest enhancement in the profile
 
 # Powers, in acquisition order: set one of the two lists, and leave the other None.

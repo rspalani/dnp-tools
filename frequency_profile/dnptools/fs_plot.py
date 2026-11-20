@@ -226,6 +226,33 @@ Power-dependence runs
     at full power. values.tsv adds drive_V, power_fraction, power_mW_cal, and y_fit,
     records.csv the first three, and 'Export: Power EPS' writes powdep.eps.
 
+Chirp grids
+    A run file with '# type = chirp2d' (written by chirp2d.py) has, per set, one CW record
+    (label cw, width 0) and one record per chirp of a grid of chirp widths (eighth column,
+    MHz) and chirp times (ninth column, us) at one centre frequency. The plot is a map:
+    chirp width across (logarithmic; 'log width' off for linear), chirp time up
+    (logarithmic), one cell per chirp of the grid with its value written in it, empty
+    until it is measured and hatched if it is not in the plan ('# chirps' in the run
+    file, e.g. cells left out by RATE_RANGE); dashed lines of constant sweep rate,
+    rate = width/time (2 x width/time for the V shapes), labelled in MHz/us; the latest
+    chirp outlined in red. 'Map' sets the colour: I_chirp/I_CW (= eps_chirp/eps_CW, the
+    intensity over that of the CW record of the set; needs no OFF record; diverging
+    colours about 1) or I_on/I_off - 1 (with the start OFF of the set or the OFF reference;
+    the intensity per scan without either). With several sets each cell is the mean over
+    them (with 'repeats' +/- its standard error, with 'noise floor' the combined sigma).
+    A click in a cell shows its latest record on the spectrum side. values.tsv adds
+    width_MHz, time_us, rate_MHz_per_us, ratio_to_cw, and cw_expno, records.csv the first
+    three, and 'Export: Chirp EPS' writes chirp2d.eps.
+
+OFF reference (profile, power-dependence, and chirp runs)
+    A run file with '# off_ref = <dataset>/<expno>' (OFF_REF in the settings) takes I_off
+    from that record, processed with the same viewer settings as the run's own records,
+    for every set; start and end OFF records of the run are then listed as checks, each
+    as a multiple of the reference. If the folder is not where the run file says, a
+    dataset of the same name next to the run's dataset is used (a copied data
+    directory). A reference without a usable value is reported and the start OFF of
+    each set is used instead.
+
 Error bars ('Error bars' in the main window; error_bars in phase.txt)
     noise floor  +/-1 sigma of each record from the noise of its own spectrum: the
                  points outside the intensity window (the whole spectrum if there is
@@ -321,6 +348,8 @@ def read_run(path):
                     "t": None,
                     "target": None,
                     "volt": None,
+                    "width": None,
+                    "ctime": None,
                 }
             except ValueError:
                 continue
@@ -344,8 +373,31 @@ def read_run(path):
                     row["t"] = None
             if meta.get("type") == "powdep":    # power dependence: the drive voltage, not D1
                 row["volt"], row["d1"] = row["d1"], None
+            if meta.get("type") == "chirp2d":   # chirp grids: chirp width (MHz) and time (us)
+                row["d1"] = None
+                for key, i in (("width", 7), ("ctime", 8)):
+                    try:
+                        row[key] = float(parts[i]) if len(parts) > i and parts[i] not in ("", "-") else None
+                    except ValueError:
+                        pass
             rows.append(row)
     return meta, rows, ended
+
+
+def off_ref_location(path, ds_dir):
+    """(dataset folder, expno) of the OFF reference in run.txt (# off_ref): the folder as
+    written, or else a dataset of the same name next to this run's dataset (a copied data
+    directory); expno None if the path does not end in an expno."""
+    path = path.strip().rstrip("/")
+    base = os.path.basename(path)
+    ds = os.path.dirname(path)
+    if not base.isdigit():
+        return ds, None
+    if not os.path.isdir(path):
+        alt = os.path.join(os.path.dirname(ds_dir), os.path.basename(ds))
+        if os.path.isdir(os.path.join(alt, base)):
+            ds = alt
+    return ds, int(base)
 
 
 def parse_center(text):
@@ -771,7 +823,7 @@ def default_phase():
             "show_integral": False, "fid_n": 4, "fid_fit": False, "show_fid_phase": False,
             "fit_model": "mono", "log_d1": False, "normalize": False,
             "error_bars": "none", "noise_from": None, "noise_to": None, "fit_sigma": False,
-            "s_eq": None, "flip_deg": None, "sqrt_power": False}
+            "s_eq": None, "flip_deg": None, "sqrt_power": False, "chirp_z": "ratio", "log_width": True}
 
 
 def phase_active(ph):
@@ -784,7 +836,7 @@ def phase_key(ph):
                            ph.get("fit_model", "mono"), bool(ph.get("log_d1")), bool(ph.get("normalize")),
                            ph.get("error_bars", "none"), ph.get("noise_from"), ph.get("noise_to"),
                            bool(ph.get("fit_sigma")), ph.get("s_eq"), ph.get("flip_deg"),
-                           bool(ph.get("sqrt_power")))
+                           bool(ph.get("sqrt_power")), ph.get("chirp_z", "ratio"), bool(ph.get("log_width", True)))
 
 
 def proc_key(ph):
@@ -940,7 +992,7 @@ def eps_path(runpath, buildup=False):
     """profile.eps (buildup.eps; decay.eps with buildup='decay') next to run.txt, or <run file
     without .txt>_profile.eps."""
     name = ("decay.eps" if buildup == "decay" else "powdep.eps" if buildup == "powdep"
-            else "buildup.eps" if buildup else "profile.eps")
+            else "chirp2d.eps" if buildup == "chirp2d" else "buildup.eps" if buildup else "profile.eps")
     if is_run_folder_layout(runpath):
         return os.path.join(os.path.dirname(runpath), name)
     return (runpath[:-4] if runpath.endswith(".txt") else runpath) + "_" + name
@@ -1014,6 +1066,9 @@ def read_phase_file(path):
     ph["s_eq"] = num("s_eq", None)
     ph["flip_deg"] = num("flip_deg", None)
     ph["sqrt_power"] = bool(int(num("sqrt_power", 0)))
+    if vals.get("chirp_z") in CHIRP_Z:
+        ph["chirp_z"] = vals["chirp_z"]
+    ph["log_width"] = bool(int(num("log_width", 1)))
     if "window_width" in vals:
         ph["win_set"] = True
         ph["center"] = num("window_center", None)
@@ -1045,7 +1100,8 @@ def write_phase_file(path, ph, runpath):
         "# outside the window) or repeats; fit_sigma = 1 weights build-up fits by 1/sigma^2.\n"
         "# Decay runs: s_eq fixes the equilibrium level (none = fitted); flip_deg overrides the\n"
         "# flip angle in the run file. Power-dependence runs: fit_model saturation or none;\n"
-        "# sqrt_power = 1 plots against the square root of the power.\n"
+        "# sqrt_power = 1 plots against the square root of the power. Chirp grids: chirp_z ratio\n"
+        "# (I_chirp/I_CW) or enh (I_on/I_off - 1); log_width = 1 for a logarithmic width axis.\n"
         "# fs_rephase.py (TopSpin)\n"
         "# applies the phase to the TopSpin data; everything else stays in the viewer.\n"
         "ph0 = %s\nph1 = %s\npivot_ppm = %s\nbase_phc0 = %s\nbase_phc1 = %s\n"
@@ -1053,7 +1109,7 @@ def write_phase_file(path, ph, runpath):
         "fid_points = %d\nfid_fit = %d\nshow_fid_phase = %d\n"
         "fit_model = %s\nlog_d1 = %d\nnormalize = %d\n"
         "error_bars = %s\nnoise_from = %s\nnoise_to = %s\nfit_sigma = %d\n"
-        "s_eq = %s\nflip_deg = %s\nsqrt_power = %d\n%s"
+        "s_eq = %s\nflip_deg = %s\nsqrt_power = %d\nchirp_z = %s\nlog_width = %d\n%s"
         % (run_label(runpath), time.strftime("%Y-%m-%d %H:%M:%S"),
            v(ph["ph0"]), v(ph["ph1"]), v(ph["pivot"]), v(ph["base0"]), v(ph["base1"]),
            1 if ph["baseline"] else 0, int(ph["order"]), 1 if ph["magnitude"] else 0,
@@ -1062,7 +1118,8 @@ def write_phase_file(path, ph, runpath):
            ph.get("fit_model", "mono"), 1 if ph.get("log_d1") else 0, 1 if ph.get("normalize") else 0,
            ph.get("error_bars", "none"), v(ph.get("noise_from")), v(ph.get("noise_to")),
            1 if ph.get("fit_sigma") else 0, v(ph.get("s_eq")), v(ph.get("flip_deg")),
-           1 if ph.get("sqrt_power") else 0, window))
+           1 if ph.get("sqrt_power") else 0, ph.get("chirp_z", "ratio"), 1 if ph.get("log_width", True) else 0,
+           window))
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         fh.write(text)
@@ -1936,6 +1993,47 @@ def draw_decay(p, a, runpath):
     relayout(fig, 0.05 if p.with_text else 0.0, 0.92)
 
 
+def draw_chirp2d(p, a, runpath):
+    """The chirp map (ax1, its colour bar in p.sec_axes) and for plot.png the latest spectrum
+    (ax2) and the lines above the map."""
+    p.layout(False)
+    ax1, ax2, ax1b = p.ax1, p.ax2, p.ax1b
+    fig = p.fig
+    ax1.set_xscale("linear")                     # clear() would set limits (0, 1) on log axes
+    ax1.set_yscale("linear")
+    ax1.clear()
+    ax1b.clear()
+    ax1b.set_visible(False)
+    if ax2 is not None:
+        ax2.clear()
+    cax, cells = plot_chirp_map(ax1, a, compact=p.compact)
+    if cax is not None:
+        p.sec_axes = [cax]
+    if p.compact:
+        p.fit_layout()
+        return
+    res = a["results"]
+    lines = ["%s: %s" % (key, row) for key, row, warn in chirp_info_rows(a, ascii_only=True)]
+    lines += off_lines(a)
+    if a["error_bars"] != "none":
+        lines.append(error_text(a, ascii_only=True))
+    lines.extend(phase_status(a))
+    bad = [r for r in res if r["kind"] == "ON" and r["value"] is None
+           and not (a["fid_mode"] and r["fid"]["read"] and r["fid"]["g"] is None)]
+    for r in bad[-3:]:
+        lines.append("expno %d: %s" % (r["expno"], r["note"]))
+    ax1.set_title("\n".join(lines), loc="left", fontsize=8, color="0.25", family="monospace")
+    draw_latest(ax2, a)
+    meta = a["meta"]
+    status = "running" if a["ended"] is None else a["ended"]
+    what = mode_label(a["mode"], a) if a["fid_mode"] else "%s, %s" % (window_text(a), a["mode"])
+    fig.suptitle("%s  |  %s  |  %s\n%s  |  chirp grid, %s  |  %d records  |  %s"
+                 % (meta.get("sample", ""), meta.get("conditions", ""),
+                    os.path.basename(meta.get("dataset_dir", "")) or os.path.dirname(runpath),
+                    run_label(runpath), what, len(res), status), fontsize=9)
+    relayout(fig, 0.05 if p.with_text else 0.0, 0.92)
+
+
 def decay_timing(a, ascii_only=False):
     """One line on how well the records met their target times ([] if there is nothing yet)."""
     recs = [r for r in a["results"] if r.get("t") is not None and r["kind"] == "OFF"
@@ -2456,6 +2554,287 @@ def powdep_info_rows(a, ascii_only=False):
     return rows
 
 
+# --------------------------------------------------------------------------
+# Chirp grids: the enhancement against chirp width and chirp time at one frequency
+# --------------------------------------------------------------------------
+CHIRP_Z = OrderedDict([("ratio", "ε_chirp/ε_CW"), ("enh", "I_on/I_off − 1")])
+CHIRP_SHAPE_NAMES = {"I": "increasing", "D": "decreasing", "V": "V-shaped", "IV": "inverted V"}
+CHIRP_RATE_LINES = (1.0, 3.0, 10.0, 30.0, 100.0)    # MHz/us, guides on the map
+CHIRP_EPS_SIZE = (4.6, 3.6)                         # in
+
+
+def chirp_factor(shape):
+    """Sweeps of the width per chirp: 2 for the V shapes."""
+    return 2.0 if shape in ("V", "IV") else 1.0
+
+
+def chirp_rate_of(a, w, t):
+    return chirp_factor(a["meta"].get("shape", "I")) * w / t
+
+
+def chirp_grid(meta, results):
+    """(widths, times) of the planned grid in run.txt, else of the chirp records so far."""
+    def nums(key):
+        try:
+            return sorted(float(x) for x in meta[key].split(","))
+        except (KeyError, ValueError):
+            return []
+    ws, ts = nums("grid_widths_MHz"), nums("grid_times_us")
+    if not ws or not ts:
+        ws = sorted(set(r["width"] for r in results if r.get("width")))
+        ts = sorted(set(r["ctime"] for r in results if r.get("ctime")))
+    return ws, ts
+
+
+def chirp_planned(meta):
+    """[(width, time)] of the chirps in the plan (run.txt '# chirps'), None if not given."""
+    try:
+        return [tuple(float(x) for x in p.split("x")) for p in meta["chirps"].split(",")]
+    except (KeyError, ValueError):
+        return None
+
+
+def chirp_value(r, zk):
+    return r.get("ratio") if zk == "ratio" else r.get("y")
+
+
+def chirp_cells(a):
+    """{(width, time): {"z", "e", "n", "recs"}}: the map's quantity of the chirp records,
+    the mean over the sets; e from the noise floor or (error bars 'repeats') the standard
+    error over the sets."""
+    zk = a["chirp_z"]
+    groups = OrderedDict()
+    for r in a["results"]:
+        if r["kind"] != "ON" or r.get("label") != "chirp" or not r.get("width") or not r.get("ctime"):
+            continue
+        if chirp_value(r, zk) is None:
+            continue
+        groups.setdefault((r["width"], r["ctime"]), []).append(r)
+    out = {}
+    for key, rs in groups.items():
+        zs = [chirp_value(r, zk) for r in rs]
+        es = [r.get("eratio") if zk == "ratio" else r.get("ey") for r in rs]
+        n = len(zs)
+        e = None
+        if a["error_bars"] == "repeats" and n > 1:
+            e = float(np.std(zs, ddof=1) / math.sqrt(n))
+        elif a["error_bars"] == "noise" and all(x is not None for x in es):
+            e = math.sqrt(sum(x * x for x in es)) / n
+        out[key] = {"z": float(np.mean(zs)), "e": e, "n": n, "recs": rs}
+    return out
+
+
+def chirp_zlabel(a, ascii_only=False):
+    """What the colour shows."""
+    if a["chirp_z"] == "ratio":
+        return "I_chirp / I_CW" if ascii_only else "I_chirp / I_CW  (= ε_chirp/ε_CW)"
+    if a["use_enh"]:
+        return "FID(t0)_on / FID(t0)_off - 1" if a["fid_mode"] else "I_on / I_off - 1"
+    return "FID(t0) / (NS*RG)" if a["fid_mode"] else "intensity per scan"
+
+
+def chirp_edges(vals, log):
+    """Cell edges around the sorted values: midpoints (geometric if log)."""
+    v = np.log(np.asarray(vals, float)) if log else np.asarray(vals, float)
+    if v.size == 1:
+        half = math.log(1.5) if log else 0.5 * max(abs(v[0]), 1.0)
+        e = np.array([v[0] - half, v[0] + half])
+    else:
+        mid = (v[1:] + v[:-1]) / 2.0
+        e = np.concatenate(([2 * v[0] - mid[0]], mid, [2 * v[-1] - mid[-1]]))
+    return np.exp(e) if log else e
+
+
+def grid_index(vals, x):
+    """Index of x in the sorted grid values (nearest, relative tolerance 1e-6); None if absent."""
+    for i, v in enumerate(vals):
+        if abs(v - x) <= 1e-6 * max(abs(v), 1e-12):
+            return i
+    return None
+
+
+def chirp_norm(a, zs):
+    """Colour scale: symmetric about 1 for I_chirp/I_CW, the data range otherwise."""
+    from matplotlib.colors import Normalize
+    if a["chirp_z"] == "ratio":
+        v = max([abs(z - 1.0) for z in zs] + [0.02])
+        return Normalize(1.0 - v * 1.05, 1.0 + v * 1.05), "RdBu_r"
+    lo, hi = (min(zs), max(zs)) if zs else (0.0, 1.0)
+    if hi - lo <= 1e-12 * max(abs(hi), 1.0):
+        lo, hi = lo - max(abs(lo) * 0.01, 1e-9), hi + max(abs(hi) * 0.01, 1e-9)
+    return Normalize(lo, hi), "viridis"
+
+
+def plot_chirp_map(ax, a, compact=False, ascii_only=False, latest=True):
+    """The map: chirp width across (log if a['log_width']), chirp time up (log), one cell per
+    chirp of the grid coloured by the map's quantity (empty: not measured yet), its value
+    written in it, lines of constant sweep rate, and the latest record outlined. Returns
+    (colourbar axes or None, cells)."""
+    from matplotlib.patches import Rectangle
+    import matplotlib.cm as mcm
+    ws, ts = chirp_grid(a["meta"], a["results"])
+    cells = chirp_cells(a)
+    if not ws or not ts:
+        ax.text(0.5, 0.5, "waiting for the first chirp record", transform=ax.transAxes,
+                ha="center", va="center", color="0.4")
+        return None, cells
+    logw = a["log_width"] and min(ws) > 0
+    ax.set_xscale("log" if logw else "linear")
+    ax.set_yscale("log")
+    xe, ye = chirp_edges(ws, logw), chirp_edges(ts, True)
+    Z = np.full((len(ts), len(ws)), np.nan)
+    for (w, t), c in cells.items():
+        i, j = grid_index(ts, t), grid_index(ws, w)
+        if i is not None and j is not None:
+            Z[i, j] = c["z"]
+    zs = [c["z"] for c in cells.values()]
+    norm, cmap_name = chirp_norm(a, zs)
+    cmap = mcm.get_cmap(cmap_name)
+    plan = chirp_planned(a["meta"])
+    plan_ij = None if plan is None else set((grid_index(ts, t), grid_index(ws, w)) for w, t in plan)
+    for i in range(len(ts)):                     # the grid, so that cells still to come show;
+        for j in range(len(ws)):                 # cells not in the plan (RATE_RANGE) hatched
+            out = plan_ij is not None and (i, j) not in plan_ij
+            ax.add_patch(Rectangle((xe[j], ye[i]), xe[j + 1] - xe[j], ye[i + 1] - ye[i], fill=out,
+                                   fc="0.93", hatch="//" if out else None, ec="0.8", lw=0.6, zorder=0.5))
+    mesh = ax.pcolormesh(xe, ye, np.ma.masked_invalid(Z), cmap=cmap, norm=norm, zorder=1)
+    fs_val = 7 if compact else 8
+    for (w, t), c in cells.items():
+        i, j = grid_index(ts, t), grid_index(ws, w)
+        if i is None or j is None:
+            continue
+        xc = math.sqrt(xe[j] * xe[j + 1]) if logw else 0.5 * (xe[j] + xe[j + 1])
+        yc = math.sqrt(ye[i] * ye[i + 1])
+        rgba = cmap(norm(c["z"]))
+        lum = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]
+        txt = ("%.2f" if a["chirp_z"] == "ratio" else "%.3g") % c["z"]
+        if c["e"] is not None:
+            txt += "\n%s%.2g" % ("+/-" if ascii_only else "±", c["e"])
+        if c["n"] > 1:
+            txt += "\n(n=%d)" % c["n"]
+        ax.text(xc, yc, txt, ha="center", va="center", fontsize=fs_val, color="white" if lum < 0.5 else "black",
+                zorder=3, bbox=dict(fc=rgba, ec="none", pad=0.6))    # the rate lines stop at the text
+    f = chirp_factor(a["meta"].get("shape", "I"))
+    wl = np.geomspace(xe[0], xe[-1], 200) if logw else np.linspace(max(xe[0], 1e-6), xe[-1], 200)
+
+    def fx(x):                                  # data to axes fraction
+        x = np.asarray(x, float)
+        if logw:
+            return (np.log(x) - math.log(xe[0])) / (math.log(xe[-1]) - math.log(xe[0]))
+        return (x - xe[0]) / (xe[-1] - xe[0])
+
+    def fy(y):
+        return (np.log(np.asarray(y, float)) - math.log(ye[0])) / (math.log(ye[-1]) - math.log(ye[0]))
+    cu = np.array([fx(w) for w in ws for t in ts])
+    cv = np.array([fy(t) for w in ws for t in ts])
+    used = []
+    for rate in CHIRP_RATE_LINES:               # time = f * width / rate
+        tl = f * wl / rate
+        inside = (tl >= ye[0]) & (tl <= ye[-1])
+        if inside.sum() < 2:
+            continue
+        ax.plot(wl[inside], tl[inside], "--", color="0.3", lw=0.8, zorder=2)
+        # the label where the line is farthest from the cell values (cell centres), in axes units
+        u, v = fx(wl[inside]), fy(tl[inside])
+        n = len(u)
+        lo, hi = int(0.1 * n), max(int(0.1 * n) + 1, int(0.9 * n))
+        edge = (np.minimum(np.minimum(u[lo:hi], 1 - u[lo:hi]), np.minimum(v[lo:hi], 1 - v[lo:hi])) < 0.05) * 10.0
+        d = -edge + np.min(np.hypot(u[lo:hi, None] - cu[None, :], (v[lo:hi, None] - cv[None, :]) * 1.6), axis=1)
+        if used:
+            d = np.minimum(d, np.min(np.hypot(u[lo:hi, None] - np.array(used)[None, :, 0],
+                                              v[lo:hi, None] - np.array(used)[None, :, 1]), axis=1) * 0.7)
+        kk = lo + int(np.argmax(d))
+        used.append((u[kk], v[kk]))
+        ax.text(wl[inside][kk], tl[inside][kk], "%g MHz/%s" % (rate, "us" if ascii_only else "µs"), fontsize=7,
+                color="0.2", ha="center", va="center", zorder=3.5,
+                bbox=dict(fc="white", ec="none", alpha=None if ascii_only else 0.8, pad=0.8))
+    last = [r for r in a["results"] if r["kind"] == "ON" and r.get("label") == "chirp" and r.get("width")
+            and r.get("ctime") and r["value"] is not None] if latest else []
+    if last:
+        r = max(last, key=lambda q: q["expno"])
+        i, j = grid_index(ts, r["ctime"]), grid_index(ws, r["width"])
+        if i is not None and j is not None:
+            ax.add_patch(Rectangle((xe[j], ye[i]), xe[j + 1] - xe[j], ye[i + 1] - ye[i], fill=False,
+                                   ec="#c0392b", lw=2.0, zorder=4))
+    ax.set_xlim(xe[0], xe[-1])
+    ax.set_ylim(ye[0], ye[-1])
+    ax.xaxis.set_major_locator(FixedLocator(ws))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos=None: "%g" % x))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.yaxis.set_major_locator(FixedLocator(ts))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos=None: "%g" % x))
+    ax.yaxis.set_minor_locator(NullLocator())
+    ax.set_xlabel("chirp width (MHz)")
+    ax.set_ylabel("chirp time (us)" if ascii_only else "chirp time (µs)")
+    cax = ax.inset_axes([1.02, 0.0, 0.035, 1.0])
+    cb = ax.figure.colorbar(mesh, cax=cax)
+    cb.ax.tick_params(labelsize=8)
+    cb.set_label(chirp_zlabel(a, ascii_only), fontsize=8 if compact else 9)
+    return cax, cells
+
+
+def chirp_info_rows(a, ascii_only=False):
+    """Rows (key, text, warn): the chirps, the CW record(s), and the largest value."""
+    meta, res = a["meta"], a["results"]
+    sep = "; " if ascii_only else " · "
+    shape = meta.get("shape", "I")
+    rows = []
+    try:
+        freq = "%.3f GHz" % float(meta.get("freq_GHz", "nan"))
+    except ValueError:
+        freq = "?"
+    ws, ts = chirp_grid(meta, res)
+    plan = chirp_planned(meta)
+    planned = len(plan) if plan is not None else len(ws) * len(ts)
+    chirps = [r for r in res if r["kind"] == "ON" and r.get("label") == "chirp"]
+    rows.append(("Chirps", sep.join([
+        "centre %s, %s (%s), AWG %s V" % (freq, shape, CHIRP_SHAPE_NAMES.get(shape, "?"), meta.get("power", "?")),
+        "rate = %swidth/time" % ("2 x " if chirp_factor(shape) == 2 else ""),
+        "%d of %d chirp record(s)%s" % (len(chirps), planned * max(1, int(meta.get("repeats", "1") or 1)),
+                                        "" if plan is None or len(plan) == len(ws) * len(ts) else
+                                        " (hatched: not in the plan)")]), False))
+    cells = chirp_cells(a)
+    mp = [("I_chirp/I_CW with the CW record of the set" if ascii_only else
+           "I_chirp/I_CW = ε_chirp/ε_CW, with the CW record of the set")
+          if a["chirp_z"] == "ratio" else chirp_zlabel(a, ascii_only)]
+    if cells:
+        (w, t), c = max(cells.items(), key=lambda kv: kv[1]["z"])
+        mu = "us" if ascii_only else "µs"
+        mp.append("largest %.4g at %g MHz, %g %s (%.3g MHz/%s)" % (c["z"], w, t, mu, chirp_rate_of(a, w, t), mu))
+    rows.append(("Map", sep.join(mp), False))
+    unit = "per NS*RG" if a["fid_mode"] else "per scan"
+    cws = [r for r in res if r["kind"] == "ON" and r.get("label") == "cw"]
+    for r in cws[-3:]:
+        pre = ("set %d: " % r["set"]) if a["multi_set"] else ""
+        if r["value"] is None:
+            rows.append(("CW", "%sexpno %d: %s" % (pre, r["expno"], r["note"]), True))
+            continue
+        txt = "%sexpno %d: %.4g %s" % (pre, r["expno"], r["value"], unit)
+        if a["use_enh"] and r.get("y") is not None:
+            txt += "%sI_on/I_off - 1 = %.4g" % (sep, r["y"])
+        rows.append(("CW", txt, False))
+    if a["chirp_z"] == "enh" and not a["use_enh"]:
+        rows.append(("Warning", "no OFF record or OFF reference: the map shows the intensity, not I_on/I_off - 1",
+                     True))
+    if a["chirp_z"] == "ratio" and chirps and not [r for r in cws if r["value"]]:
+        rows.append(("Warning", "no CW record with a value: the map cannot show I_chirp/I_CW", True))
+    return rows
+
+
+def write_chirp_eps(path, a, aspect=None):
+    """The chirp map as shown, for Adobe Illustrator as write_profile_eps."""
+    from matplotlib.backends.backend_ps import FigureCanvasPS
+    if not chirp_cells(a):
+        raise ValueError("no chirp record with a value yet")
+    with matplotlib.rc_context(EPS_RC):
+        fig = Figure(figsize=(CHIRP_EPS_SIZE))        # the window's aspect does not suit a map
+        FigureCanvasPS(fig)
+        ax = fig.add_subplot(111)
+        plot_chirp_map(ax, a, compact=False, ascii_only=True, latest=False)
+        fig.subplots_adjust(left=0.13, right=0.80, bottom=0.14, top=0.96)
+        save_eps_for_illustrator(fig, path)
+
+
 def planned_records(runpath):
     """[(expno, expected s)] of a build-up from settings.txt in the run folder, or None."""
     if not is_run_folder_layout(runpath):
@@ -2527,7 +2906,7 @@ class Analyzer:
     def set_display(self, **flags):
         """Sets display-only settings (show_integral, show_fid_phase; for build-ups fit_model,
         log_d1, normalize) and saves them. Returns an error text or ''."""
-        bools = ("show_integral", "show_fid_phase", "log_d1", "normalize", "fit_sigma", "sqrt_power")
+        bools = ("show_integral", "show_fid_phase", "log_d1", "normalize", "fit_sigma", "sqrt_power", "log_width")
         self.phase = dict(self.phase, **dict((k, bool(v) if k in bools else v) for k, v in flags.items()))
         try:
             write_phase_file(self.phase_path, self.phase, self.runpath)
@@ -2699,27 +3078,43 @@ class Analyzer:
         fid_mode = mode == FID_MODE
         need_fid = force_fid or fid_mode or bool(ph.get("show_fid_phase"))
 
-        results = []
-        for r in rows:
+        chirp2d = meta.get("type") == "chirp2d"
+
+        def process(r, ds):
             res = dict(r)
             res.update(value=None, at=None, ns=None, note="", readable=False,
                        phase_skipped=False, files=None, integral=None, fid=None)
             try:
-                files = file_key(os.path.join(ds_dir, str(r["expno"])))
+                files = file_key(os.path.join(ds, str(r["expno"])))
             except Exception as ex:
                 files = None
                 res["note"] = str(ex)
             if files is not None:
-                key = (r["expno"], files, skey, center, width, mode)
+                key = (r["expno"], files, skey, center, width, mode, None if ds == ds_dir else ds)
                 v = self.values.get(key)
                 if v is None:
-                    v = self._value(ds_dir, r["expno"], files, ph, center, width, mode)
+                    v = self._value(ds, r["expno"], files, ph, center, width, mode)
                     self.values[key] = v
                 res.update(v)
                 res["files"] = files
             if need_fid:
-                self._add_fid(res, ds_dir, ph, fid_mode)
-            results.append(res)
+                self._add_fid(res, ds, ph, fid_mode)
+            return res
+        results = [process(r, ds_dir) for r in rows]
+        # OFF reference from another run (OFF_REF; not for build-ups and decays), processed
+        # like the records of this run
+        ref, ref_path, ref_ds = None, meta.get("off_ref"), None
+        if ref_path and not (buildup or decay):
+            ref_ds, ref_expno = off_ref_location(ref_path, ds_dir)
+            if ref_expno is None:
+                ref = {"expno": None, "kind": "OFF", "label": "reference", "value": None, "integral": None,
+                       "err": None, "err_int": None, "files": None, "fid": None,
+                       "note": "not an expno folder: %s" % ref_path}
+            else:
+                ref = process({"expno": ref_expno, "kind": "OFF", "label": "reference", "freq": None, "ns_run": 0,
+                               "finished": "", "set": 0, "d1": None, "t": None, "target": None, "volt": None,
+                               "width": None, "ctime": None}, ref_ds)
+            ref["path"] = os.path.join(ref_ds, str(ref_expno)) if ref_expno is not None else ref_path
 
         # FID phase relative to the median over the ON records
         fid_ref, latest_fid = None, None
@@ -2730,7 +3125,7 @@ class Analyzer:
                 on_ph = [r["fid"]["phase"] for r in results if r["fid"]["phase"] is not None]
             if on_ph:
                 fid_ref = phase_reference(on_ph)
-                for r in results:
+                for r in results + ([ref] if ref is not None and ref["fid"] else []):
                     if r["fid"]["phase"] is not None:
                         r["fid"]["phase_rel"] = float(wrap_pm180(r["fid"]["phase"] - fid_ref))
             have = [r for r in results if r["fid"]["read"]]
@@ -2741,10 +3136,10 @@ class Analyzer:
                 except Exception:
                     latest_fid = None
 
-        for r in results:
+        for r in results + ([ref] if ref is not None else []):
             r.update(err=None, err_int=None, noise=None, err_note="")
             if errm == "noise" and r["files"] is not None:
-                n = self._noise(ds_dir, r, ph, center, width, mode, region)
+                n = self._noise(ds_dir if r is not ref else ref_ds, r, ph, center, width, mode, region)
                 r.update(err=n["err"], err_int=n["err_int"], noise=n["noise"], err_note=n["note"])
                 for k, v in (("err", r["value"]), ("err_int", r["integral"])):
                     if r[k] is not None and v is not None and not r[k] > 1e-9 * abs(v):
@@ -2759,6 +3154,12 @@ class Analyzer:
         valid = dict((s, o) for s, o in starts.items() if o["value"] not in (None, 0.0))
         use_enh = off_mode in ("start", "both") and len(valid) > 0
         valid_i = dict((s, o) for s, o in starts.items() if o["integral"] not in (None, 0.0))
+        ref_used = ref is not None and ref["value"] not in (None, 0.0)
+        if ref_used:                             # the reference for every set; start/end OFFs are checks
+            set_ids = set(r["set"] for r in results) or set([1])
+            valid = dict((s, ref) for s in set_ids)
+            valid_i = dict((s, ref) for s in set_ids) if ref["integral"] not in (None, 0.0) else {}
+            use_enh = True
         for r in results:
             r["yi"] = None
             if r["kind"] != "ON" or r["integral"] is None:
@@ -2778,6 +3179,20 @@ class Analyzer:
             else:
                 r["note"] = (r["note"] + "; " if r["note"] else "") + \
                     "no usable start OFF in set %d" % r["set"]
+        if chirp2d:                              # chirp records relative to the CW record of their set
+            cw = OrderedDict()
+            for r in results:
+                if r["kind"] == "ON" and r.get("label") == "cw" and r["value"] not in (None, 0.0) \
+                        and r["set"] not in cw:
+                    cw[r["set"]] = r
+            for r in results:
+                r["ratio"] = r["eratio"] = r["cw_ref"] = None
+                if r["kind"] != "ON" or r["value"] is None or not cw:
+                    continue
+                c = cw.get(r["set"]) or cw[min(cw, key=lambda s: abs(s - r["set"]))]   # else the nearest set's
+                r["ratio"], r["cw_ref"] = r["value"] / c["value"], c["expno"]
+                if errm == "noise" and r is not c:
+                    r["eratio"] = ratio_sigma(r["value"], r.get("err"), c["value"], c.get("err"))
 
         if buildup:                              # ON and OFF are both series, against D1
             for r in results:
@@ -2795,6 +3210,9 @@ class Analyzer:
         sqrt_p = powdep and cal is not None and bool(ph.get("sqrt_power"))
         for r in results:
             r["pmw"] = r["pfrac"] = None
+            if chirp2d:                          # the map, no profile
+                r["px"] = None
+                continue
             if not powdep:
                 r["px"] = r["freq"]
                 continue
@@ -2853,10 +3271,13 @@ class Analyzer:
                 "width": width, "mode": mode, "off_mode": off_mode, "use_enh": use_enh,
                 "starts": valid, "latest": latest, "phase": dict(ph), "ds_dir": ds_dir,
                 "multi_set": len(set(r["set"] for r in results)) > 1,
-                "show_integral": bool(ph.get("show_integral")) and mode != "sum" and not buildup,
+                "show_integral": bool(ph.get("show_integral")) and mode != "sum" and not buildup and not chirp2d,
+                "off_ref": ref, "off_ref_used": ref_used, "chirp2d": chirp2d,
+                "chirp_z": ph.get("chirp_z", "ratio") if ph.get("chirp_z") in CHIRP_Z else "ratio",
+                "log_width": bool(ph.get("log_width", True)),
                 "n_phase_skipped": len([q for q in results if q["phase_skipped"]]),
                 "fid_mode": fid_mode, "fid_n": int(ph["fid_n"]), "fid_fit": bool(ph["fid_fit"]),
-                "show_fid_phase": bool(ph.get("show_fid_phase")), "need_fid": need_fid,
+                "show_fid_phase": bool(ph.get("show_fid_phase")) and not chirp2d, "need_fid": need_fid,
                 "fid_ref": fid_ref, "latest_fid": latest_fid, "plan": run_plan(self.runpath),
                 "buildup": buildup, "fits": fits,
                 "fit_model": decay_model(ph.get("fit_model", "mono")) if decay else
@@ -2959,6 +3380,17 @@ class Analyzer:
             if a.get("power_cal") is not None:
                 head.append("power_fraction: power at drive_V / power at %s; power_mW_cal: from the "
                             "calibration (%s)" % (cal_text(a["power_cal"]), a["power_cal"]["source"]))
+        if a.get("chirp2d"):                     # chirp width, time, and sweep rate after the frequency
+            cols[5:5] = ["width_MHz", "time_us", "rate_MHz_per_us"]
+            for row, r in zip(rows, a["results"]):
+                ok = r.get("width") is not None and r.get("ctime")
+                row[5:5] = ["" if r.get("width") is None else "%g" % r["width"],
+                            "" if r.get("ctime") is None else "%g" % r["ctime"],
+                            "%.4g" % chirp_rate_of(a, r["width"], r["ctime"]) if ok else ""]
+            head.append("rate_MHz_per_us: %swidth / time" % ("2 x " if chirp_factor(a["meta"].get("shape", "I")) == 2
+                                                             else ""))
+        if a.get("off_ref") is not None:
+            head.append(off_ref_text(a, True))
         if a.get("error_bars") == "noise":       # noise-floor sigmas at the end
             cols += ["noise_sigma_point_per_scan", "sigma_value", "sigma_integral"]
             head.append("noise_sigma_point_per_scan: noise of one spectrum point; sigma_value: of the "
@@ -3156,6 +3588,12 @@ def profile_info(a, runpath):
     rows.append(("Measure", " · ".join(meas), False))
     if a.get("powdep"):
         rows += powdep_info_rows(a)
+    if a.get("chirp2d"):
+        rows += chirp_info_rows(a)
+    if a.get("off_ref") is not None:
+        rows.append(("OFF ref", off_ref_text(a, full=False).replace("OFF reference ", "", 1)
+                     .replace("NS*RG", "NS·RG"), not a.get("off_ref_used")))
+    ref = a.get("off_ref") if a.get("off_ref_used") else None
     unit = "per NS·RG" if fidm else "per scan"
     offs = [r for r in res if r["kind"] == "OFF"]
     set_ids = sorted(set(r["set"] for r in offs))
@@ -3166,7 +3604,8 @@ def profile_info(a, runpath):
             if r["value"] is None:
                 txt.append("%s (expno %d): %s" % (r["label"], r["expno"], r["note"]))
             else:
-                txt.append("%s (expno %d) %.4g %s" % (r["label"], r["expno"], r["value"], unit))
+                txt.append("%s (expno %d) %.4g %s" % (r["label"], r["expno"], r["value"], unit)
+                           + ((", %.3f × reference" % (r["value"] / ref["value"])) if ref is not None else ""))
             if r["label"] == "start" and so is None:
                 so = r
         eo = [q for q in offs if q["set"] == s and q["label"] == "end"]
@@ -3176,7 +3615,8 @@ def profile_info(a, runpath):
     if len(set_ids) > 3:
         rows.append(("", "(OFF records of the last 3 of %d sets)" % len(set_ids), False))
     if a["off_mode"] in ("start", "both") and not a["use_enh"]:
-        rows.append(("Warning", "no usable start OFF: the profile shows the intensity per scan", True))
+        rows.append(("Warning", "no usable start OFF: the %s shows the intensity per scan"
+                     % ("map" if a.get("chirp2d") else "profile"), True))
     for line in fid_status(a):
         if line.startswith("WARNING: "):
             rows.append(("Warning", line[len("WARNING: "):], True))
@@ -3325,7 +3765,16 @@ def write_tsv(path, a):
     with open(path, "w") as fh:
         fh.write("# %s; y = %s\n"
                  % (what,
+                    "I_on/I_off - 1 (OFF reference)" if a.get("off_ref_used") else
                     "I_on/I_off - 1 (start OFF of the set)" if a["use_enh"] else "intensity per scan"))
+        if a.get("off_ref") is not None:
+            fh.write("# %s\n" % off_ref_text(a, True))
+        chirp = a.get("chirp2d")
+        if chirp:
+            for key, row, warn in chirp_info_rows(a, ascii_only=True):
+                if key in ("Chirps", "Map"):
+                    fh.write("# %s: %s\n" % (key.lower(), row))
+            fh.write("# ratio_to_cw: intensity_per_scan / intensity_per_scan of the CW record (cw_expno) of the set\n")
         st = phase_status(a)
         fh.write("# %s\n" % ("; ".join(st) if st else "phase: as processed by TopSpin"))
         em = a.get("error_bars", "none")
@@ -3346,6 +3795,11 @@ def write_tsv(path, a):
                                              powdep_summary(f, cal, True) + "".join("; " + n for n in f["notes"])))
         extra = {"none": "", "noise": "\tsigma_per_scan\ty_sigma\tintegral_sigma\ty_integral_sigma",
                  "repeats": "\ty_mean\ty_sem\tn_repeats"}[em]
+        if chirp:
+            extra = extra.replace("y_mean\ty_sem", "map_mean\tmap_sem")
+            extra += "\twidth_MHz\ttime_us\trate_MHz_per_us\tratio_to_cw\tcw_expno"
+            extra += "\tratio_sigma" if em == "noise" else ""
+            cells = chirp_cells(a)
         fh.write("expno\tkind\tlabel\tfreq_GHz\t%sns\tintensity_per_scan\tppm_of_point\ty\tnote\tset"
                  "\tintegral_per_scan\ty_integral%s%s\n"
                  % ("drive_V\tpower_fraction\tpower_mW_cal\t" if powdep else "", extra,
@@ -3363,10 +3817,24 @@ def write_tsv(path, a):
             if em == "noise":
                 vals = [r.get("err"), r.get("ey"), r.get("err_int"), r.get("eyi")]
                 extra = "".join("\t" + ("" if v is None else "%.4g" % v) for v in vals)
+            elif em == "repeats" and chirp:      # the mean of the map's cell
+                m = [c for c in cells.values() if r in c["recs"]]
+                extra = ("\t%.6g\t%s\t%d" % (m[0]["z"], "" if m[0]["e"] is None else "%.4g" % m[0]["e"],
+                                              m[0]["n"])) if m else "\t\t\t"
             elif em == "repeats":
                 m = [q for q in groups if r in q["recs"]]
                 extra = ("\t%.6g\t%s\t%d" % (m[0]["y"], "" if m[0]["e"] is None else "%.4g" % m[0]["e"],
                                               m[0]["n"])) if m else "\t\t\t"
+            if chirp:
+                ok = r.get("width") is not None and r.get("ctime")
+                extra += "\t%s\t%s\t%s\t%s\t%s" % (
+                    "" if r.get("width") is None else "%g" % r["width"],
+                    "" if r.get("ctime") is None else "%g" % r["ctime"],
+                    "%.4g" % chirp_rate_of(a, r["width"], r["ctime"]) if ok else "",
+                    "" if r.get("ratio") is None else "%.6g" % r["ratio"],
+                    "" if r.get("cw_ref") is None else "%d" % r["cw_ref"])
+                if em == "noise":
+                    extra += "\t" + ("" if r.get("eratio") is None else "%.4g" % r["eratio"])
             pcols = ""
             if powdep:
                 pcols = "%s\t%s\t%s\t" % ("" if r.get("volt") is None else "%.3f" % r["volt"],
@@ -3455,6 +3923,10 @@ def record_what(r, multi):
         what = "%s, D1 %g s" % (r["kind"], r["d1"])
     elif r.get("volt") is not None and r["kind"] == "ON":
         what = "ON %.3f V" % r["volt"] + ((", %.2f of full power" % r["pfrac"]) if r.get("pfrac") is not None else "")
+    elif r["kind"] == "ON" and r.get("label") == "cw":
+        what = "CW"
+    elif r["kind"] == "ON" and r.get("width") is not None and r.get("ctime") is not None:
+        what = "chirp %g MHz, %g us" % (r["width"], r["ctime"])
     else:
         what = ("ON %.3f GHz" % r["freq"]) if r["kind"] == "ON" else ("OFF %s" % r["label"])
     return ("set %d, %s" % (r["set"], what)) if multi else what
@@ -3618,6 +4090,72 @@ def draw_latest(ax2, a):
     ax2.axhline(0.0, color="0.8", lw=0.6)
 
 
+def off_ref_name(a, full=False):
+    """The OFF reference as '<dataset>/<expno>' (full: its path)."""
+    ref = a["off_ref"]
+    path = ref.get("path") or a["meta"].get("off_ref", "?")
+    if full:
+        return path
+    return "/".join(path.rstrip("/").split("/")[-2:])
+
+
+def off_ref_text(a, ascii_only=False, full=True):
+    """One line on the OFF reference of the run (OFF_REF): its value, or why it is not used."""
+    ref = a["off_ref"]
+    name = off_ref_name(a, full)
+    if a.get("off_ref_used"):
+        extra = ""
+        if a["show_integral"] and ref.get("integral") is not None:
+            extra += ", integral %.4g" % ref["integral"]
+        if (a["fid_mode"] or a["show_fid_phase"]) and ref.get("fid") and ref["fid"].get("phase_rel") is not None:
+            extra += ", FID phase %+.1f deg" % ref["fid"]["phase_rel"]
+        return "OFF reference %s: %.4g per %s%s (the I_off of every set)" % (
+            name, ref["value"], "NS*RG" if a["fid_mode"] else "scan", extra)
+    why = ref.get("note") or ("zero" if ref.get("value") == 0.0 else "no value")
+    return "OFF reference %s not usable (%s): %s" % (
+        name, why, "the start OFF of each set is used instead" if a["use_enh"] else "intensities are plotted")
+
+
+def off_lines(a):
+    """Lines on the OFF records of the last 3 sets (and the OFF reference), above the plot."""
+    res, multi, fidm, show_i = a["results"], a["multi_set"], a["fid_mode"], a["show_integral"]
+    ref = a.get("off_ref") if a.get("off_ref_used") else None
+    lines = []
+    if a.get("off_ref") is not None:
+        lines.append(off_ref_text(a, True, full=False))
+    offs = [r for r in res if r["kind"] == "OFF"]
+    set_ids = sorted(set(r["set"] for r in offs))
+    if len(set_ids) > 3:
+        lines.append("(OFF records of the last 3 of %d sets)" % len(set_ids))
+        set_ids = set_ids[-3:]
+    show_ph = fidm or a["show_fid_phase"]
+    for s in set_ids:
+        pre = ("set %d  " % s) if multi else ""
+        so = None
+        for r in [q for q in offs if q["set"] == s]:
+            if r["value"] is None:
+                lines.append("%sOFF %s (expno %d): %s" % (pre, r["label"], r["expno"], r["note"]))
+            else:
+                extra = (", integral %.4g" % r["integral"]) if show_i and r["integral"] is not None else ""
+                if show_ph and r["fid"] and r["fid"]["phase_rel"] is not None:
+                    extra += ", FID phase %+.1f deg" % r["fid"]["phase_rel"]
+                if ref is not None:
+                    extra += ", %.3f x the reference" % (r["value"] / ref["value"])
+                lines.append("%sOFF %s (expno %d): %.4g per %s%s"
+                             % (pre, r["label"], r["expno"], r["value"], "NS*RG" if fidm else "scan", extra))
+            if r["label"] == "start" and so is None:
+                so = r
+        eo = [q for q in offs if q["set"] == s and q["label"] == "end"]
+        if so is not None and so["value"] and eo and eo[0]["value"] is not None:
+            extra = ""
+            if show_i and so["integral"] and eo[0]["integral"] is not None:
+                extra = " (integral %.3f)" % (eo[0]["integral"] / so["integral"])
+            lines.append("%send OFF / start OFF = %.3f%s" % (pre, eo[0]["value"] / so["value"], extra))
+    if a["off_mode"] in ("start", "both") and not a["use_enh"]:
+        lines.append("start OFF not available: plotting intensity per scan")
+    return lines
+
+
 def draw(p, a, runpath):
     """p: Panels. ax1b, the twin of ax1 (right-hand axis), takes the integral when
     intensities are plotted."""
@@ -3631,6 +4169,8 @@ def draw(p, a, runpath):
         return draw_buildup(p, a, runpath)
     if a.get("decay"):
         return draw_decay(p, a, runpath)
+    if a.get("chirp2d"):
+        return draw_chirp2d(p, a, runpath)
     p.layout(a["show_fid_phase"])
     ax1, ax2, ax1b, ax3 = p.ax1, p.ax2, p.ax1b, p.ax3
     fig = p.fig
@@ -3703,7 +4243,11 @@ def draw(p, a, runpath):
                  ha="center", va="center", color="0.4")
     if a["use_enh"]:
         ax1.axhline(0.0, color="0.6", lw=0.8)
-        if len(a["starts"]) == 1 and not multi:
+        if a.get("off_ref_used"):
+            ax1.set_ylabel("%s\n(per %s; OFF = reference %s)" % (
+                "FID(t0)_on / FID(t0)_off - 1" if fidm else "I_on / I_off - 1", "NS*RG" if fidm else "scan",
+                off_ref_name(a)), linespacing=1.6)
+        elif len(a["starts"]) == 1 and not multi:
             off_expno = list(a["starts"].values())[0]["expno"]
             if fidm:
                 ax1.set_ylabel("FID(t0)_on / FID(t0)_off - 1\n(per NS*RG; OFF = expno %d)" % off_expno)
@@ -3742,41 +4286,15 @@ def draw(p, a, runpath):
             p.sec_axes = powdep_axes(ax1, a, bottom_ax=ax3, compact=p.compact)
 
     # OFF records, phase and problems, shown above the profile
-    lines = []
+    lines = off_lines(a)
     offs = [r for r in res if r["kind"] == "OFF"]
-    set_ids = sorted(set(r["set"] for r in offs))
-    if len(set_ids) > 3:
-        lines.append("(OFF records of the last 3 of %d sets)" % len(set_ids))
-        set_ids = set_ids[-3:]
-    show_ph = fidm or a["show_fid_phase"]
-    for s in set_ids:
-        pre = ("set %d  " % s) if multi else ""
-        so = None
-        for r in [q for q in offs if q["set"] == s]:
-            if r["value"] is None:
-                lines.append("%sOFF %s (expno %d): %s" % (pre, r["label"], r["expno"], r["note"]))
-            else:
-                extra = (", integral %.4g" % r["integral"]) if show_i and r["integral"] is not None else ""
-                if show_ph and r["fid"] and r["fid"]["phase_rel"] is not None:
-                    extra += ", FID phase %+.1f deg" % r["fid"]["phase_rel"]
-                lines.append("%sOFF %s (expno %d): %.4g per %s%s"
-                             % (pre, r["label"], r["expno"], r["value"], "NS*RG" if fidm else "scan", extra))
-            if r["label"] == "start" and so is None:
-                so = r
-        eo = [q for q in offs if q["set"] == s and q["label"] == "end"]
-        if so is not None and so["value"] and eo and eo[0]["value"] is not None:
-            extra = ""
-            if show_i and so["integral"] and eo[0]["integral"] is not None:
-                extra = " (integral %.3f)" % (eo[0]["integral"] / so["integral"])
-            lines.append("%send OFF / start OFF = %.3f%s" % (pre, eo[0]["value"] / so["value"], extra))
-    if a["off_mode"] in ("start", "both") and not a["use_enh"]:
-        lines.append("start OFF not available: plotting intensity per scan")
     if errm != "none":
         lines.append(error_text(a, ascii_only=True))
     if powdep:
         if a["use_enh"]:
-            lines.append("y: I_on/I_off - 1 per %s, with the start OFF of %s"
-                         % ("NS*RG" if fidm else "scan", "each set" if multi else "the set"))
+            lines.append("y: I_on/I_off - 1 per %s, with %s"
+                         % ("NS*RG" if fidm else "scan", "the OFF reference" if a.get("off_ref_used") else
+                            "the start OFF of each set" if multi else "the start OFF of the set"))
         for key, row, warn in powdep_info_rows(a, ascii_only=True):
             lines.append("%s: %s" % (key, row))
     lines.extend(phase_status(a))
@@ -4086,6 +4604,8 @@ def write_profile_eps(path, a, aspect=None):
         return write_buildup_eps(path, a, aspect)
     if a.get("decay"):
         return write_decay_eps(path, a, aspect)
+    if a.get("chirp2d"):
+        return write_chirp_eps(path, a, aspect)
     from matplotlib.backends.backend_ps import FigureCanvasPS
     on = [r for r in a["results"] if r["kind"] == "ON" and r["y"] is not None and r.get("px") is not None]
     if not on:
@@ -4315,6 +4835,10 @@ def record_label(r, multi):
         s += "%s  D1 %g s" % (r["kind"], r["d1"])
     elif r["kind"] == "ON" and r.get("volt") is not None:
         s += "ON %.3f V" % r["volt"]
+    elif r["kind"] == "ON" and r.get("label") == "cw":
+        s += "CW %.3f GHz" % r["freq"] if r["freq"] is not None else "CW"
+    elif r["kind"] == "ON" and r.get("width") is not None and r.get("ctime") is not None:
+        s += "chirp %g MHz %g us" % (r["width"], r["ctime"])
     elif r["kind"] == "ON" and r["freq"] is not None:
         s += "ON %.3f GHz" % r["freq"]
     else:
@@ -4442,6 +4966,7 @@ class MainWindow:
         except Exception:
             rtype = None
         self.buildup, self.decay, self.powdep = rtype == "buildup", rtype == "decay", rtype == "powdep"
+        self.chirp2d = rtype == "chirp2d"
         self.curve = self.buildup or self.decay       # fitted curves instead of a profile
         self.models = (list(DECAY_MODELS) if self.decay else list(POWDEP_MODELS) if self.powdep
                        else list(FIT_MODELS))
@@ -4465,14 +4990,25 @@ class MainWindow:
         self.reopen_entry.insert(0, reopen)
         self.reopen_entry.configure(state="readonly")
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
-        ttk.Label(bar, text="Also plot:").pack(side=tk.LEFT)
         self.int_var = tk.IntVar(value=0)
-        if not self.curve:                       # build-ups, decays: the integral is not plotted
+        self.fph_var = tk.IntVar(value=0)
+        if self.chirp2d:                         # chirp grids: what the map shows, the width axis
+            ttk.Label(bar, text="Map:").pack(side=tk.LEFT)
+            self.chirp_combo = ttk.Combobox(bar, state="readonly", width=14, values=list(CHIRP_Z.values()))
+            self.chirp_combo.pack(side=tk.LEFT, padx=(6, 0))
+            self.chirp_combo.current(0)
+            self.chirp_combo.bind("<<ComboboxSelected>>", self.on_chirp_display)
+            self.logw_var = tk.IntVar(value=1)
+            ttk.Checkbutton(bar, text="log width", variable=self.logw_var,
+                            command=self.on_chirp_display).pack(side=tk.LEFT, padx=(8, 0))
+        else:
+            ttk.Label(bar, text="Also plot:").pack(side=tk.LEFT)
+        if not self.curve and not self.chirp2d:  # build-ups, decays: the integral is not plotted
             ttk.Checkbutton(bar, text="window integral", variable=self.int_var,
                             command=self.on_integral).pack(side=tk.LEFT, padx=(6, 0))
-        self.fph_var = tk.IntVar(value=0)
-        ttk.Checkbutton(bar, text="FID phase", variable=self.fph_var,
-                        command=self.on_fid_phase).pack(side=tk.LEFT, padx=(10 if not self.curve else 6, 0))
+        if not self.chirp2d:
+            ttk.Checkbutton(bar, text="FID phase", variable=self.fph_var,
+                            command=self.on_fid_phase).pack(side=tk.LEFT, padx=(10 if not self.curve else 6, 0))
         if self.curve:                           # fit model and axes of the build-up or decay
             ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
             ttk.Label(bar, text="Fit:").pack(side=tk.LEFT)
@@ -4507,7 +5043,7 @@ class MainWindow:
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
         ttk.Label(bar, text="Export:").pack(side=tk.LEFT)
         ttk.Button(bar, text="Decay EPS" if self.decay else "Build-up EPS" if self.buildup
-                   else "Power EPS" if self.powdep else "Profile EPS",
+                   else "Power EPS" if self.powdep else "Chirp EPS" if self.chirp2d else "Profile EPS",
                    command=self.save_eps).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(bar, text="CSV", width=5, command=self.export_csv).pack(side=tk.LEFT, padx=(4, 0))
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
@@ -4760,6 +5296,10 @@ class MainWindow:
                 ph = self.analyzer.phase
                 self.fit_combo.current(self.models.index(powdep_model(ph.get("fit_model"))))
                 self.sqrt_var.set(1 if ph.get("sqrt_power") else 0)
+            if self.chirp2d:
+                ph = self.analyzer.phase
+                self.chirp_combo.current(list(CHIRP_Z).index(a["chirp_z"]))
+                self.logw_var.set(1 if ph.get("log_width", True) else 0)
             self.spec.sync(a, phase_changed == "proc", self.selected_row())
             # Live: off from the start for a run that has ended; off when the run ends
             if a["ended"] is None:
@@ -4872,6 +5412,8 @@ class MainWindow:
             return self.on_click_buildup(event)
         if a["decay"]:
             return self.on_click_decay(event)
+        if a.get("chirp2d"):
+            return self.on_click_chirp(event)
         if a["error_bars"] == "repeats" and event.inaxes in (p.ax1, p.ax1b):
             g, gi = profile_means(a)
             best, dmin = None, 30.0
@@ -5064,6 +5606,35 @@ class MainWindow:
                                                normalize=bool(self.norm_var.get())))
         self.refresh(reschedule=False)
 
+    def on_chirp_display(self, event=None):
+        self.set_msg(self.analyzer.set_display(chirp_z=list(CHIRP_Z)[max(0, self.chirp_combo.current())],
+                                               log_width=bool(self.logw_var.get())))
+        self.refresh(reschedule=False)
+
+    def on_click_chirp(self, event):
+        """Left click in a cell of the chirp map: shows the latest record of that cell."""
+        a = self.last_a
+        if event.inaxes is not self.p.ax1 or event.xdata is None or event.ydata is None:
+            return
+        self.set_msg("")
+        ws, ts = chirp_grid(a["meta"], a["results"])
+        if not ws or not ts:
+            return
+        logw = a["log_width"] and min(ws) > 0
+        xe, ye = chirp_edges(ws, logw), chirp_edges(ts, True)
+        j = int(np.searchsorted(xe, event.xdata)) - 1
+        i = int(np.searchsorted(ye, event.ydata)) - 1
+        if not (0 <= i < len(ts) and 0 <= j < len(ws)):
+            return
+        rs = [r for r in a["results"] if r["kind"] == "ON" and r.get("label") == "chirp" and r.get("width")
+              and r.get("ctime") and grid_index(ws, r["width"]) == j and grid_index(ts, r["ctime"]) == i]
+        if not rs:
+            self.set_msg("%g MHz, %g µs: not measured yet" % (ws[j], ts[i]))
+            return
+        best = max(rs, key=lambda q: q["expno"])
+        if not self.show_record(best["expno"]):
+            self.set_msg("expno %d has no processed spectrum to show" % best["expno"])
+
     def on_sqrt_power(self):
         self.set_msg(self.analyzer.set_display(sqrt_power=bool(self.sqrt_var.get())))
         self.refresh(reschedule=False)
@@ -5073,11 +5644,14 @@ class MainWindow:
         self.refresh(reschedule=False)
 
     def save_eps(self):
-        path = eps_path(self.runpath, "decay" if self.decay else "powdep" if self.powdep else self.buildup)
+        path = eps_path(self.runpath, "decay" if self.decay else "powdep" if self.powdep else
+                        "chirp2d" if self.chirp2d else self.buildup)
         w = self.canvas.get_tk_widget()
         aspect = w.winfo_height() / float(max(1, w.winfo_width()))
         try:
             write_profile_eps(path, self.last_a, aspect)
+            if self.chirp2d:
+                return self.set_msg("Wrote %s (the chirp map as shown, for Adobe Illustrator)" % path, error=False)
             self.set_msg("Wrote %s (%.1f x %.1f in, the %s as shown, for Adobe Illustrator)"
                          % (path, EPS_WIDTH, min(5.0, max(2.0, EPS_WIDTH * aspect)),
                             "decay" if self.decay else "build-up" if self.buildup else

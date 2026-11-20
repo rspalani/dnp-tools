@@ -1,7 +1,7 @@
-# DNP frequency profiles, build-ups, decays, and power dependences
+# DNP frequency profiles, build-ups, decays, power dependences, and chirp grids
 
 Acquisition and live display of DNP frequency profiles, build-up curves,
-decays, and power dependences on the 800 MHz DNP spectrometer (TopSpin 3.6.2). For a profile, a TopSpin
+decays, power dependences, and chirp grids on the 800 MHz DNP spectrometer (TopSpin 3.6.2). For a profile, a TopSpin
 script steps the mm-wave frequency through the AWG, acquires and processes one
 record per frequency, and a viewer plots the enhancement against frequency while
 the records come in. For a build-up, a second script acquires one record per
@@ -11,8 +11,11 @@ with the microwaves on, switches them off, and acquires small-flip-angle records
 at set times afterwards; the viewer fits the decay back to equilibrium. For a
 power dependence, a fourth script acquires one record per AWG drive voltage at
 one frequency, and the viewer plots the enhancement against the mm-wave power
-from the source's calibration. Another TopSpin script applies the phase set in
-the viewer to the TopSpin data after a run.
+from the source's calibration. For a chirp grid, a fifth script acquires one
+record per chirp width and chirp time at one centre frequency, plus a CW
+record, and the viewer shows the enhancement as a map over width and time.
+Another TopSpin script applies the phase set in the viewer to the TopSpin data
+after a run.
 
 The headers of `fs_core.py`, `fs_plot.py`, and `fs_rephase_core.py` describe in
 detail what each program does; this page covers installation and use.
@@ -21,8 +24,8 @@ detail what each program does; this page covers installation and use.
 
 | In this folder | Installed as | What it is |
 |---|---|---|
-| `dnptools/fs_core.py` | `/opt/dnptools/fs_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, decays, and power dependences: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
-| `dnptools/fs_plot.py` | `/opt/dnptools/fs_plot.py` | Viewer (Python 3): profile, build-up, decay, or power dependence with fits, one record at a time, phase/baseline/window, exports |
+| `dnptools/fs_core.py` | `/opt/dnptools/fs_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, decays, power dependences, and chirp grids: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
+| `dnptools/fs_plot.py` | `/opt/dnptools/fs_plot.py` | Viewer (Python 3): profile, build-up, decay, power dependence, or chirp map with fits, one record at a time, phase/baseline/window, exports |
 | `dnptools/awg_power_cal.txt` | `/opt/dnptools/awg_power_cal.txt` | Output power of the 527 GHz source against the AWG drive voltage (for power dependences) |
 | `dnptools/fs_rephase_core.py` | `/opt/dnptools/fs_rephase_core.py` | Post-run phasing of the TopSpin data with the viewer's phase |
 | `dnptools/awg_cmd.py` | `/opt/dnptools/awg_cmd.py` | Sends one command to the AWG control server (set its address; see below) |
@@ -30,6 +33,7 @@ detail what each program does; this page covers installation and use.
 | `topspin/bu.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/bu.py` | TopSpin command `bu <name>` (build-up) |
 | `topspin/decay.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/decay.py` | TopSpin command `decay <name>` (decay) |
 | `topspin/powdep.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/powdep.py` | TopSpin command `powdep <name>` (power dependence) |
+| `topspin/chirp2d.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/chirp2d.py` | TopSpin command `chirp2d <name>` (chirp grid) |
 | `topspin/fs_rephase.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/fs_rephase.py` | TopSpin command `fs_rephase` |
 | `settings/settings_template.py` | `/opt/nmrdata/fs_settings/` | Template for the settings files, one per kind of experiment |
 | `settings/settings_p1.py`, `settings_bdpa.py`, `settings_nox.py` | `/opt/nmrdata/fs_settings/` | Settings for the P1 diamond, BDPA, and m-TinyPol profiles |
@@ -39,13 +43,15 @@ detail what each program does; this page covers installation and use.
 | `settings/decay_p1.py` | `/opt/nmrdata/fs_settings/` | Decay settings for the P1 diamond at 100 K (set `FREQ` before the first run) |
 | `settings/powdep_template.py` | `/opt/nmrdata/fs_settings/` | Template for the power-dependence settings files |
 | `settings/powdep_p1.py` | `/opt/nmrdata/fs_settings/` | Power-dependence settings for the P1 diamond (set `FREQ` and D1 before the first run) |
+| `settings/chirp2d_template.py` | `/opt/nmrdata/fs_settings/` | Template for the chirp-grid settings files |
+| `settings/chirp2d_p1.py` | `/opt/nmrdata/fs_settings/` | Chirp grid for the P1 diamond at 100 K: 526.008 GHz, 10 to 80 MHz x 1 to 8 µs, D1 3000 s (about 14.3 h) |
 
 The TopSpin scripts only start the code in `/opt/dnptools` (with `execfile`,
 so that TopSpin always runs the current version without being restarted).
 
 ## Requirements
 
-- TopSpin 3.6.2 (its Jython 2.7 runs `fs.py`, `bu.py`, `decay.py`, `powdep.py`, and `fs_rephase.py`).
+- TopSpin 3.6.2 (its Jython 2.7 runs `fs.py`, `bu.py`, `decay.py`, `powdep.py`, `chirp2d.py`, and `fs_rephase.py`).
 - `python` on the PATH, Python 2.7 or 3, for `awg_cmd.py`.
 - For the viewer: `/usr/bin/python3` (3.6 or newer) with `numpy`, `matplotlib`
   (3.3 or newer), and `python3-tk`. Without a display the viewer writes its
@@ -69,8 +75,8 @@ sudo chmod a+r /opt/dnptools/*.py /opt/dnptools/awg_power_cal.txt
 
 # TopSpin commands
 U=/opt/topspin3.6.2/exp/stan/nmr/py/user
-sudo cp topspin/fs.py topspin/bu.py topspin/decay.py topspin/powdep.py topspin/fs_rephase.py $U/
-sudo chmod a+r $U/fs.py $U/bu.py $U/decay.py $U/powdep.py $U/fs_rephase.py
+sudo cp topspin/fs.py topspin/bu.py topspin/decay.py topspin/powdep.py topspin/chirp2d.py topspin/fs_rephase.py $U/
+sudo chmod a+r $U/fs.py $U/bu.py $U/decay.py $U/powdep.py $U/chirp2d.py $U/fs_rephase.py
 
 # settings (-n: settings files already on the spectrometer are kept)
 sudo mkdir -p /opt/nmrdata/fs_settings
@@ -273,6 +279,72 @@ old runs.
 The run folder is labelled `powdep_<name>`; `run.txt` has `# type = powdep`,
 the calibration, and the drive voltage of each record in an eighth column.
 
+## Running a chirp grid
+
+A chirp grid measures the enhancement at one centre frequency for every
+combination of a list of chirp widths and a list of chirp times. Each set
+(`REPEATS`) is an optional OFF record, one CW record at `FREQ`, one ON record
+per chirp, and an optional OFF record. The AWG server gets
+`chirp FREQ <width MHz> <time µs> <shape> POWER` for a chirp record (it repeats
+the chirp back to back for the whole record) and `cw FREQ POWER` for the CW
+record. The sweep rate of a chirp is width/time, or twice that for the V and
+inverted-V shapes, which sweep the width twice per chirp.
+
+The CW record is the reference of the map: I_chirp/I_CW equals ε_chirp/ε_CW
+for large enhancements and needs no OFF record. At a D1 of tens of minutes an
+OFF record costs as much as a chirp, so `chirp2d_p1.py` acquires none; for
+I_on/I_off − 1, set `OFF_REF` to an OFF record of an earlier run (next section),
+or `OFF_MODE` to acquire one.
+
+1. Make a settings file, or use `chirp2d_p1.py`:
+
+   ```bash
+   cp /opt/nmrdata/fs_settings/chirp2d_template.py /opt/nmrdata/fs_settings/chirp2d_<name>.py
+   ```
+
+   Besides the dataset, template, and live-plot settings of a profile it has
+   `FREQ` (GHz), `POWER` (AWG drive voltage, default and maximum 0.4 V),
+   `WIDTHS_MHZ`, `TIMES_US`, `CHIRP_SHAPE` (`I` increasing, the default; `D`,
+   `V`, `IV`), `D1`, `ON_SCANS`, and `OFF_SCANS`. `RATE_RANGE = (lo, hi)` keeps
+   only the chirps whose sweep rate (MHz/µs) lies in that range. `ORDER =
+   "center_out"` acquires the chirps from the rate closest to `RATE_CENTER`
+   outwards, so that a run stopped early has the chirps of most interest;
+   `"grid"` goes row by row.
+2. In TopSpin, type `chirp2d <name>` (`chirp2d` alone lists the files).
+3. The confirmation dialog shows the grid as a table with the acquisition order
+   and sweep rate of each cell (cells outside `RATE_RANGE` grey), and the total
+   time.
+
+`chirp2d_p1.py` (P1 diamond at 100 K, T_B about 40 min): 526.008 GHz, widths
+10, 20, 40, 80 MHz and times 1, 2, 4, 8 µs, D1 3000 s (1.25 T_B), one scan,
+no OFF. Factor-2 steps on both axes put four chirps on the 10 MHz/µs diagonal,
+three each on 5 and 20 MHz/µs, two on 2.5 and 40, and one on 1.25 and 80; with
+the CW record that is 17 records of about 50 min, about 14.3 h. Check `FREQ`,
+the dataset, `START_EXPNO`, and the template before the run.
+
+The run folder is labelled `chirp2d_<name>`; `run.txt` has `# type = chirp2d`,
+the grid, the chirps in acquisition order (`# chirps`), and the chirp width
+(MHz) and time (µs) of each record in two more columns (width 0 for the CW
+record).
+
+## An OFF record from an earlier run (`OFF_REF`)
+
+In `fs`, `powdep`, and `chirp2d` settings, `OFF_REF` names an OFF record that
+is already acquired: an expno of the run's dataset (`OFF_REF = 312`) or the
+path of an expno folder in another dataset
+(`OFF_REF = "/opt/nmrdata/rsh/2611/312"`). The viewer then takes I_off from it,
+processed with the same viewer settings as the run's own records, for every
+set. `OFF_MODE` still acquires OFF records at the start and/or end of each set
+if asked; with a reference they serve as drift checks and are listed as a
+multiple of the reference.
+
+Before the run, the script checks that the record has a processed spectrum
+(`pdata/1/1r`) and compares its RG, P1, PLW1, and pulse program with the
+template's, and its D1 with the run's `D1`; a difference appears as a warning in
+the confirmation dialog, which can still be accepted. An OFF record taken with
+another D1 or receiver gain does not give the enhancement. `run.txt` has
+`# off_ref = <expno folder>`.
+
 ## The viewer
 
 It opens by itself during a run; to open it later, for any run:
@@ -409,6 +481,36 @@ with its fitted curve.
 - **Exports:** "Export: Power EPS" writes `powdep.eps`. `values.tsv` adds
   `drive_V`, `power_fraction`, `power_mW_cal`, and `y_fit`; `records.csv` adds
   the first three.
+
+### Chirp runs in the viewer
+
+- **Map:** chirp width across (logarithmic; untick "log width" for linear),
+  chirp time up (logarithmic), one cell per chirp with its value written in it.
+  A cell is empty until its record arrives, and hatched if it is not in the
+  plan (left out by `RATE_RANGE`). Dashed lines mark constant sweep rates
+  (1, 3, 10, 30, 100 MHz/µs, computed as 2 × width/time for the V shapes). The
+  latest chirp is outlined in red.
+- **Map** in the top bar sets the colour: ε_chirp/ε_CW (I_chirp/I_CW, with the
+  CW record of the set; colours diverge about 1, red above) or I_on/I_off − 1
+  (with the start OFF of the set or `OFF_REF`; the intensity per scan without
+  either). The rows above the map give the CW record's value and enhancement,
+  and the largest cell with its rate.
+- **Sets:** with `REPEATS` above 1, each cell is the mean over the sets; with
+  "repeats" error bars it shows ± its standard error, with "noise floor" the
+  combined σ.
+- **Click** a cell to show its latest record on the spectrum side.
+- **Exports:** "Export: Chirp EPS" writes `chirp2d.eps` (4.6 × 3.6 in, no
+  latest-record outline). `values.tsv` adds `width_MHz`, `time_us`,
+  `rate_MHz_per_us`, `ratio_to_cw`, and `cw_expno`; `records.csv` adds the first
+  three.
+
+### OFF reference in the viewer
+
+For a run with `# off_ref`, the "OFF ref" row gives the reference's value; its
+OFF records, if any, are listed as a multiple of it, and the y label names it.
+If the folder is not where `run.txt` says (a copied data directory), a dataset
+of the same name next to the run's dataset is used. A reference that cannot be
+read is reported, and the start OFF of each set is used instead.
 
 ### Error bars
 
