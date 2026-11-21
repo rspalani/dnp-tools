@@ -17,16 +17,16 @@
 #RUN_LABEL = "bu_name"
 
 SAMPLE   = "Diamond P1 center"
-MAS_INFO = "13 kHz MAS, 1.3 mm diamond(c-3-1) rotor, 100 K"
+MAS_INFO = "13 kHz MAS, 1.3 mm diamond(c-1-3) rotor, 100 K"
 
 # Dataset and template expno. Values set here are used; leave DATA_DIR and
 # DATA_NAME both "" to use the dataset open in TopSpin when the script starts,
 # and TEMPLATE_EXPNO = None to use the expno open in TopSpin as the template
 # (it must belong to that dataset). Every record is created from the template
 # with wrpa; D1, NS and DS are then set for each record.
-DATA_DIR       = ""          # e.g. "/opt/nmrdata/rsh"
-DATA_NAME      = ""          # e.g. "2610_4"
-TEMPLATE_EXPNO = None        # e.g. 10
+DATA_DIR       = "/opt/nmrdata/wiesnern"
+DATA_NAME      = "2611_3"
+TEMPLATE_EXPNO = 10          # its pulse program must saturate before D1
 
 START_EXPNO = 600            # first new expno; all planned expnos must be free
 REPEATS     = 1              # repeats of the whole plan, each in its own expnos
@@ -35,11 +35,15 @@ SERIES = "on"                # FREQS works with "on" only
 
 # Frequencies (GHz), one build-up each. An entry can also be a (frequency, power) pair,
 # e.g. (526.008, 0.147) for a build-up at 21.5 mW; plain entries get POWER.
+# Enhancements from the 100 K profile of 2026-11-08 (about 5 min per point, maximum 213):
 #   526.008  the positive maximum (the CW frequency of the chirp grid)
-#   525.985  the low-frequency side of the positive lobe, about 0.9 of the maximum
-#   526.030  the steep side above the maximum, about 0.5 of it
-#   526.180  the negative maximum
-FREQS      = [526.008, 525.985, 526.030, 526.180]
+#   526.030  the steep side above the maximum, about half of it (enhancement about 107)
+#   526.090  near the zero crossing (about 526.105), enhancement about 28; at 526.095 it is
+#            about 18, and the slope there is about 2 per MHz
+#   526.180  the negative maximum, about -180
+# (525.985, on the low side of the positive lobe at about 0.9 of the maximum, is left out
+# to keep the run near 12 h.)
+FREQS      = [526.008, 526.030, 526.090, 526.180]
 FREQ_ORDER = "by_d1"         # "by_d1": at each D1 every frequency in turn;
                              # "by_freq": the whole build-up of one frequency, then the next
 POWER      = 0.4             # AWG drive voltage for the entries without their own (at most 0.4)
@@ -47,15 +51,16 @@ POWER      = 0.4             # AWG drive voltage for the entries without their o
 SCAN_OVERHEAD = 5            # s per scan beyond D1 (saturation block, pulses, acquisition);
                              # used for the time estimate, the deadline, and ns_for_time below
 
-# Build-up times D1 (s). T_B at 526.008 GHz is about 40 min at 100 K, so 150 s to 6000 s
-# (about 0.06 to 2.5 T_B), six values evenly spaced on a log scale: 150, 314, 657, 1370,
-# 2870, 6000 s. They are acquired in a mixed order rather than from short to long, so
-# that a drift over the run does not run along the D1 axis of every curve; the viewer
-# sorts them. About 12.7 h for four frequencies.
-D1_LIST = [1370, 150, 6000, 314, 2870, 657]
+# Build-up times D1 (s). T_B at 526.008 GHz is about 40 min at 100 K, and the build-up is
+# stretched, so the longest D1 is 7200 s (3 T_B) to pin the plateau, with 150 s to 7200 s
+# about evenly spaced on a log scale: 150, 450, 1300, 3100, 7200 s. They are acquired in a
+# mixed order rather than from short to long, so that a drift over the run does not run
+# along the D1 axis of every curve; the viewer sorts them. About 13.8 h for four frequencies.
+D1_LIST = [1300, 150, 7200, 450, 3100]
 
-# One scan per record (the enhanced signal is large even at 150 s).
-NS_LIST     = 1
+# Scans per record, in the order of D1_LIST: two at 150 s, where the signal near the zero
+# crossing is smallest, otherwise one.
+NS_LIST     = [1, 2, 1, 1, 1]
 OFF_NS_LIST = None           # not used (no OFF records)
 DS          = 0              # dummy scans, set on every record (with saturation, 0 is enough)
 

@@ -181,7 +181,7 @@ series by frequency; with "Error bars: repeats" the mean is over the repeats of
 the same frequency. Writing `D1_LIST` in a mixed order, rather than from short to
 long, keeps a drift from running along the D1 axis of every curve.
 `buildup_p1_freqs.py` is the example: the P1-diamond sample at 100 K, four
-frequencies across the profile, D1 150 to 6000 s in a mixed order, about 12.7 h.
+frequencies across the profile, D1 150 to 7200 s in a mixed order, about 13.8 h.
 
 The run folder is in `fs_runs` as for a profile, labelled `bu_<name>`; `run.txt`
 has `# type = buildup` and the D1 of each record, and `settings.txt` lists every
