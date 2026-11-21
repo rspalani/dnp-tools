@@ -59,6 +59,15 @@ SERIES = "on"
 FREQ  = None                 # GHz, e.g. the frequency of the largest enhancement in the profile
 POWER = 0.4                  # second argument of the AWG 'cw' command
 
+# Several frequencies in one run (SERIES "on" only): set FREQS instead of FREQ, one
+# build-up per entry. An entry is a frequency in GHz, which gets POWER, or a
+# (frequency, power) pair. FREQ_ORDER "by_d1" acquires, at each D1, one record at every
+# frequency in turn (a drift then affects every frequency alike); "by_freq" the whole
+# build-up of one frequency, then the next. Each frequency is its own set in run.txt and
+# in the viewer. buildup_p1_freqs.py is an example.
+#FREQS      = [526.008, 525.985, (526.008, 0.147)]
+#FREQ_ORDER = "by_d1"
+
 SCAN_OVERHEAD = 5            # s per scan beyond D1 (saturation block, pulses, acquisition);
                              # used for the time estimate, the deadline, and ns_for_time below
 

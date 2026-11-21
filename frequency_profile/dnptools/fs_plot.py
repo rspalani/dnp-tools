@@ -181,7 +181,11 @@ Build-up runs
     records.csv a d1_s column, and 'Export: Build-up EPS' writes buildup.eps.
     The expected end of a running build-up is the sum of the expected durations
     of the records still to come (from settings.txt), and the run counts as
-    quiet only when the next record is overdue.
+    quiet only when the next record is overdue. A build-up at several
+    frequencies (FREQS in the settings; '# set_cw' in run.txt) has one set per
+    frequency; each series is named by its frequency (and power, where they
+    differ), and the 'repeats' error bars average over the repeats of the same
+    frequency.
 
 Decay runs
     A run file with '# type = decay' (written by decay.py through fs_core.py) has a
@@ -381,7 +385,40 @@ def read_run(path):
                     except ValueError:
                         pass
             rows.append(row)
+    cw = parse_set_cw(meta)
+    if cw:                                      # multi-frequency build-up: the condition of each set
+        for row in rows:
+            if row["set"] in cw:
+                row["cond"] = cw[row["set"]][2]
     return meta, rows, ended
+
+
+def parse_set_cw(meta):
+    """{set: (GHz, power, condition index from 1)} of a build-up with several frequencies
+    ('# set_cw = 1 526.0080 0.4; 2 525.9850 0.4; ...' in the run file), or {}. Sets with the
+    same frequency and power (repeats) share the condition index."""
+    text = meta.get("set_cw", "").strip()
+    out, conds = {}, []
+    for part in text.split(";"):
+        f = part.split()
+        if len(f) != 3:
+            continue
+        try:
+            s, ghz, pw = int(f[0]), float(f[1]), float(f[2])
+        except ValueError:
+            continue
+        key = (round(ghz, 6), round(pw, 6))
+        if key not in conds:
+            conds.append(key)
+        out[s] = (ghz, pw, conds.index(key) + 1)
+    return out
+
+
+def cond_label(cw, s, ascii_only=False):
+    """'526.008 GHz' for set s (with the power when the sets differ in power)."""
+    ghz, pw, k = cw[s]
+    powers = set(round(v[1], 6) for v in cw.values())
+    return ("%.3f GHz" % ghz) if len(powers) == 1 else ("%.3f GHz, power %g" % (ghz, pw))
 
 
 def off_ref_location(path, ds_dir):
@@ -1466,6 +1503,17 @@ def buildup_view(results, errm):
     point)}}. With errm 'repeats', one series per kind (set 0): the mean over the records
     with the same D1 (in any set), with its standard error."""
     out = OrderedDict()
+    if errm == "repeats" and any(r.get("cond") for r in results):
+        # several frequencies: one mean series per frequency (key (kind, -condition))
+        for kind in ("ON", "OFF"):
+            for k in sorted(set(r["cond"] for r in results if r.get("cond"))):
+                g = repeat_means([r for r in results if r["kind"] == kind and r.get("cond") == k
+                                  and r["y"] is not None and r["d1"] is not None], "d1", "y")
+                if g:
+                    out[(kind, -k)] = {"x": [q["x"] for q in g], "y": [q["y"] for q in g],
+                                       "e": [q["e"] for q in g], "ns": [q["ns"] for q in g],
+                                       "n": [q["n"] for q in g], "recs": [q["recs"] for q in g]}
+        return out
     if errm == "repeats":
         for kind in ("ON", "OFF"):
             g = repeat_means([r for r in results if r["kind"] == kind and r["y"] is not None
@@ -1489,14 +1537,14 @@ def buildup_fits(view, model, fit_sigma=False):
     for key, v in view.items():
         e = v["e"]
         use_sigma = fit_sigma and all(x is not None and x > 0 for x in e)
-        rough = key[1] == 0 and min(v["n"]) < 3       # standard errors of 2 records: too rough
+        rough = key[1] <= 0 and min(v["n"]) < 3       # standard errors of 2 records: too rough
         try:
             if use_sigma and not rough:
                 f = fit_buildup(v["x"], v["y"], [1.0 / x ** 2 for x in e], model, absolute=True)
                 if f["chi2_red"] is not None and f["chi2_red"] > 3:
                     f["notes"].append("scatter about %.2g times the error bars (chi2/dof %.3g)%s"
                                       % (math.sqrt(f["chi2_red"]), f["chi2_red"],
-                                         "" if key[1] == 0 else "; for a weak signal the extreme or max "
+                                         "" if key[1] <= 0 else "; for a weak signal the extreme or max "
                                          "of the window follows the noise, 'sum' does not"))
             else:
                 f = fit_buildup(v["x"], v["y"], v["ns"], model)
@@ -3279,7 +3327,7 @@ class Analyzer:
                 "fid_mode": fid_mode, "fid_n": int(ph["fid_n"]), "fid_fit": bool(ph["fid_fit"]),
                 "show_fid_phase": bool(ph.get("show_fid_phase")) and not chirp2d, "need_fid": need_fid,
                 "fid_ref": fid_ref, "latest_fid": latest_fid, "plan": run_plan(self.runpath),
-                "buildup": buildup, "fits": fits,
+                "buildup": buildup, "fits": fits, "set_cw": parse_set_cw(meta) if buildup else {},
                 "fit_model": decay_model(ph.get("fit_model", "mono")) if decay else
                 powdep_model(ph.get("fit_model")) if powdep else ph.get("fit_model", "mono"),
                 "powdep": powdep, "power_cal": cal, "sqrt_power": sqrt_p,
@@ -3634,6 +3682,30 @@ def series_name(key, multi):
     return ("%s set %d" % (kind, s)) if multi else kind
 
 
+def bu_series_name(key, a):
+    """Name of a build-up series: by its frequency for a build-up with several frequencies
+    ('526.008 GHz', '526.008 GHz #2' for a repeat, '526.008 GHz mean'), else series_name."""
+    cw = a.get("set_cw") or {}
+    kind, s = key
+    if not cw:
+        return series_name(key, a["multi_set"])
+    if s < 0:
+        first = min([q for q in cw if cw[q][2] == -s] or [0])
+        return ("%s mean" % cond_label(cw, first)) if first else "%s mean" % kind
+    if s not in cw:
+        return series_name(key, a["multi_set"])
+    reps = len([q for q in cw if cw[q][2] == cw[s][2]])
+    k = len([q for q in cw if cw[q][2] == cw[s][2] and q <= s])
+    return cond_label(cw, s) + ((" #%d" % k) if reps > 1 else "")
+
+
+def bu_fit_key(r, em):
+    """The key of the fitted series that holds record r (see buildup_view)."""
+    if em == "repeats":
+        return (r["kind"], -r["cond"]) if r.get("cond") else (r["kind"], 0)
+    return (r["kind"], r["set"])
+
+
 def fit_ratios(a):
     """[(set, S_inf ratio, max S/sqrt(t) ratio)] for the sets with both ON and OFF fitted."""
     out = []
@@ -3668,7 +3740,7 @@ def buildup_info(a, runpath):
     multi = a["multi_set"]
     notes = []
     for key, f in a["fits"].items():
-        name = series_name(key, multi)
+        name = bu_series_name(key, a)
         if "error" in f:
             rows.append((name, "no fit: %s" % f["error"], True))
             continue
@@ -3713,8 +3785,12 @@ def write_buildup_tsv(path, a):
         em = a["error_bars"]
         if em != "none":
             fh.write("# %s\n" % error_text(a, ascii_only=True))
+        cw = a.get("set_cw") or {}
+        if cw:
+            fh.write("# sets: %s\n" % "; ".join(["%d = %.4f GHz, power %g" % (q, cw[q][0], cw[q][1])
+                                                  for q in sorted(cw)]))
         for key, f in fits.items():
-            name = series_name(key, a["multi_set"])
+            name = bu_series_name(key, a)
             if "error" in f:
                 fh.write("# %s: no fit: %s\n" % (name, f["error"]))
             else:
@@ -3730,7 +3806,7 @@ def write_buildup_tsv(path, a):
         fh.write("expno\tkind\tlabel\tset\td1_s\tns\tintensity_per_scan\tppm_of_point\tfit_per_scan\tnote%s\n"
                  % extra)
         for r in a["results"]:
-            f = fits.get((r["kind"], 0 if em == "repeats" else r["set"]))
+            f = fits.get(bu_fit_key(r, em))
             fv = ""
             if f is not None and "error" not in f and r["d1"] is not None:
                 fv = "%.6g" % fit_model_value(f["model"], f["p"], [r["d1"]])[0]
@@ -4379,7 +4455,7 @@ def plot_buildup(ax1, ax1b, a, ascii_only=False, ms=5):
                 continue                       # nothing to normalize to
             scale = 1.0 / f["s_inf"]
         scales[key] = scale
-        name = series_name(key, multi)
+        name = bu_series_name(key, a)
         withe = [(x, y, e) for x, y, e in zip(v["x"], v["y"], v["e"]) if e is not None]
         if withe:
             c = ax.errorbar([q[0] for q in withe], [q[1] * scale for q in withe],
@@ -4508,7 +4584,7 @@ def draw_buildup(p, a, runpath):
     if a["error_bars"] != "none":
         lines.append(error_text(a, ascii_only=True))
     for key, f in a["fits"].items():
-        name = series_name(key, multi)
+        name = bu_series_name(key, a)
         lines.append("%s: %s" % (name, ("no fit: " + f["error"]) if "error" in f
                                  else fit_summary(f, ascii_only=True)))
         if "error" not in f:

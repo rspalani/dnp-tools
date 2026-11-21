@@ -90,6 +90,12 @@ polarization. The settings that differ from a profile:
                  "interleaved" (ON and OFF at each D1, back to back), "on_then_off"
                  or "off_then_on" (all of one kind, then all of the other)
     FREQ, POWER  the ON records' 'cw' command (not needed for SERIES "off")
+    FREQS        instead of FREQ (SERIES "on" only): one build-up per entry, a frequency
+                 (GHz, with POWER) or a (frequency, power) pair; each is its own set
+                 (with REPEATS, the repeats follow as further sets), and run.txt lists
+                 them ('# set_cw = <set> <GHz> <power>; ...')
+    FREQ_ORDER   with FREQS: "by_d1" (at each D1, every frequency in turn; default) or
+                 "by_freq" (one whole build-up after the other); expnos in acquisition order
 Template, expno checks, timing, run folder, index and viewer are as for a
 profile. The run folder is in fs_runs as well, labelled bu_<name> unless
 RUN_LABEL is set; run.txt has '# type = buildup' and an eighth column with D1
@@ -238,6 +244,10 @@ BU_SETTINGS = [
     ("REPEATS",          1),
     ("SERIES",           "on"),       # one of BU_SERIES
     ("FREQ",             None),       # GHz, for the ON records (not needed for SERIES "off")
+    ("FREQS",            None),       # instead of FREQ: several frequencies (GHz), or (GHz, power)
+                                      # pairs, one build-up each (SERIES "on" only)
+    ("FREQ_ORDER",       "by_d1"),    # with FREQS: "by_d1" (at each D1, every frequency in turn)
+                                      # or "by_freq" (the whole build-up of one frequency, then the next)
     ("POWER",            None),       # second argument of 'cw' (not needed for SERIES "off")
     ("D1_LIST",          REQUIRED),   # build-up times (s), in acquisition order
     ("NS_LIST",          REQUIRED),   # scans per ON record: one number, or a list with one per D1
@@ -913,7 +923,44 @@ def run_buildup(S, source=None):
         if ns_off is None:
             return
     FREQ, POWER = c["FREQ"], c["POWER"]
-    if has_on:
+    FREQS = c["FREQS"]
+    FREQ_ORDER = str(c["FREQ_ORDER"]).strip().lower()
+    conds = None                                 # with FREQS: [(GHz, power, 'cw' command)]
+    if FREQS is not None:
+        if SERIES != "on":
+            fail("FREQS (several frequencies) works with SERIES 'on' only (got '%s'); the OFF "
+                 "build-up does not depend on the frequency, so run it separately." % SERIES)
+            return
+        if FREQ is not None:
+            fail("set FREQ (one frequency) or FREQS (several), not both.")
+            return
+        if FREQ_ORDER not in ("by_d1", "by_freq"):
+            fail("FREQ_ORDER must be 'by_d1' or 'by_freq' (got '%s')." % FREQ_ORDER)
+            return
+        if not isinstance(FREQS, (list, tuple)) or not FREQS:
+            fail("FREQS must be a list of frequencies in GHz, e.g. [526.008, 525.985].")
+            return
+        conds = []
+        for x in FREQS:
+            pair = isinstance(x, (list, tuple))
+            try:
+                if pair:
+                    if len(x) != 2:
+                        raise ValueError("not a pair")
+                    f, p = float(x[0]), float(x[1])
+                else:
+                    f, p = float(x), float(POWER)
+            except CATCH:
+                fail("FREQS entry %r: each entry is a frequency in GHz, which gets POWER, or a "
+                     "(frequency, power) pair%s." % (x, "" if pair else "; POWER is not set (got %r)" % (POWER,)))
+                return
+            if not check_power(fail, "the power of FREQS entry %r" % (x,), p):
+                return
+            if [q for q in conds if abs(q[0] - f) < 5e-7 and abs(q[1] - p) < 5e-7]:
+                fail("FREQS has %.4f GHz at power %g twice." % (f, p))
+                return
+            conds.append((f, p, 'cw %.3f %.3f' % (f, p)))
+    if has_on and conds is None:
         for name in ("FREQ", "POWER"):
             try:
                 float(c[name])
@@ -940,12 +987,47 @@ def run_buildup(S, source=None):
         per_set = [("ON", i) for i in range(n)] + [("OFF", i) for i in range(n)]
     else:
         per_set = [("OFF", i) for i in range(n)] + [("ON", i) for i in range(n)]
-    cmdstr = ('cw %.3f %.2f' % (FREQ, POWER)) if has_on else None
+    cmdstr = ('cw %.3f %.2f' % (FREQ, POWER)) if (has_on and conds is None) else None
 
     def set_tag(set_number):
         return ("set %d | " % set_number) if REPEATS > 1 else ""
 
+    nf = len(conds) if conds else 0
+    same_power = bool(conds) and len(set([q[1] for q in conds])) == 1
+
+    def cond_text(k):
+        """The frequency (and power, if they differ) of condition k, for titles and the log."""
+        f, p, cmd = conds[k]
+        return ("%.3f GHz" % f) if same_power else ("%.3f GHz, power %g" % (f, p))
+
+    def make_plan_freqs(start_expno):
+        """FREQS: one set per frequency (and repeat), set = (repeat - 1) * nf + k + 1; expnos in
+        acquisition order, one block of nf * n per repeat."""
+        plan = []
+        for rep in range(1, REPEATS + 1):
+            base = start_expno + (rep - 1) * nf * n
+            if FREQ_ORDER == "by_d1":
+                order = [(i, k) for i in range(n) for k in range(nf)]
+            else:
+                order = [(i, k) for k in range(nf) for i in range(n)]
+            for j, (i, k) in enumerate(order):
+                d1, ns = d1s[i], ns_on[i]
+                f, p, cmd = conds[k]
+                set_number = (rep - 1) * nf + k + 1
+                tag = ("repeat %d | " % rep) if REPEATS > 1 else ""
+                plan.append({
+                    "expno": base + j, "set": set_number, "kind": "ON", "label": "on",
+                    "freq": f, "d1": d1, "ns": ns, "awg": cmd,
+                    "title": ("build-up | %s%s | %s | %s | D1 = %s s | %d scan(s)"
+                              % (tag, SAMPLE, MAS_INFO, cmd, d1, ns)),
+                    "what": "%sON %s D1 %s s" % (tag, cond_text(k), d1),
+                    "skip": "%sON %s at D1 %s s" % (tag, cond_text(k), d1),
+                    "last": "%s, D1 %s s" % (cond_text(k), d1)})
+        return plan
+
     def make_plan(start_expno):
+        if conds:
+            return make_plan_freqs(start_expno)
         plan = []
         for set_number in range(1, REPEATS + 1):
             base = start_expno + (set_number - 1) * len(per_set)
@@ -974,7 +1056,30 @@ def run_buildup(S, source=None):
     def d1_ns_html(nss):
         return ", ".join(["%s&nbsp;s&nbsp;&#215;&nbsp;%d" % (d1, k) for d1, k in zip(d1s, nss)])
 
+    def dialog_rows_freqs(plan):
+        lines = []
+        for rep in range(1, REPEATS + 1):
+            recs = [p for p in plan if (p["set"] - 1) // nf == rep - 1]
+            body = ("%d build-ups, %s: %d&#8211;%d"
+                    % (nf, "at each D1 every frequency in turn" if FREQ_ORDER == "by_d1"
+                       else "one frequency after the other", recs[0]["expno"], recs[-1]["expno"]))
+            lines.append((("repeat %d: " % rep) if REPEATS > 1 else "") + body)
+        if len(lines) > 6:
+            lines = lines[:3] + ["..."] + lines[-1:]
+        out = [("Plan", "<br>".join(lines))]
+        out.append(("mm-wave", "<br>".join(
+            ["set %d: %.3f GHz, power %g (AWG '%s')" % (k + 1, q[0], q[1], q[2]) for k, q in enumerate(conds)]
+            + (["repeats: sets %d&#8211;%d, the same frequencies in the same order" % (nf + 1, nf * REPEATS)]
+               if REPEATS > 1 else []))))
+        out.append(("D1 &#215; NS", d1_ns_html(ns_on)))
+        out.append(("Scans", "%d build-up times per frequency, %s&#8211;%s s, in this order; DS %d. "
+                    "The pulse program must saturate before D1." % (n, min(d1s), max(d1s), DS)))
+        return out
+
     def dialog_rows(plan):
+        if conds:
+            return dialog_rows_freqs(plan)
+
         def set_line(set_number):
             recs = [p for p in plan if p["set"] == set_number]
             first, last = recs[0]["expno"], recs[-1]["expno"]
@@ -1036,8 +1141,19 @@ def run_buildup(S, source=None):
                 "# started = %s\n"
                 "# columns: expno, kind, label, freq_GHz, ns, finished, set, d1_s\n"
                 % (run_id, RUN_LABEL, SAMPLE, MAS_INFO, ds_root, SERIES,
-                   ("%.4f" % FREQ) if has_on else "-", ("%.2f" % POWER) if has_on else "-",
-                   peak_str, repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, DS, REPEATS, started))
+                   ("%.4f" % FREQ) if (has_on and not conds) else "-",
+                   ("%.2f" % POWER) if (has_on and not conds) else "-",
+                   peak_str, repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, DS, REPEATS, started)
+                ).replace("# columns:", freqs_header() + "# columns:", 1)
+
+    def freqs_header():
+        """With FREQS: the frequency and power of each set, for fs_plot.py ('' without)."""
+        if not conds:
+            return ""
+        return ("# freq_order = %s\n# set_cw = %s\n"
+                % (FREQ_ORDER, "; ".join(["%d %.4f %g" % ((rep - 1) * nf + k + 1, q[0], q[1])
+                                          for rep in range(1, REPEATS + 1)
+                                          for k, q in enumerate(conds)])))
 
     def settings_comments(plan, record_time):
         out = ["# planned records (expno, set, kind, D1 s, NS, expected s; read by fs_plot.py):"]
@@ -1050,11 +1166,16 @@ def run_buildup(S, source=None):
         "noun": "build-up", "table": BU_SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"SERIES": SERIES, "FREQ": FREQ, "POWER": POWER, "D1_LIST": d1s,
-                 "NS_LIST": ns_on, "OFF_NS_LIST": ns_off if has_off else c["OFF_NS_LIST"]},
+                 "NS_LIST": ns_on, "OFF_NS_LIST": ns_off if has_off else c["OFF_NS_LIST"],
+                 "FREQS": [(q[0], q[1]) for q in conds] if conds else None,
+                 "FREQ_ORDER": FREQ_ORDER},
         "settings_comments": settings_comments,
         "d1_column": True, "on_noun": "ON records",
-        "start_desc": "%d set(s), series %s, %d build-up times per set" % (REPEATS, SERIES, n),
-        "end_desc": "%d set(s), series %s" % (REPEATS, SERIES)}, source)
+        "start_desc": (("%d frequencies x %d repeat(s), %s, %d build-up times each"
+                        % (nf, REPEATS, FREQ_ORDER, n)) if conds else
+                       "%d set(s), series %s, %d build-up times per set" % (REPEATS, SERIES, n)),
+        "end_desc": (("%d frequencies x %d repeat(s)" % (nf, REPEATS)) if conds else
+                     "%d set(s), series %s" % (REPEATS, SERIES))}, source)
 
 
 def run_decay(S, source=None):

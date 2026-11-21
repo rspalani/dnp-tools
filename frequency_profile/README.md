@@ -39,6 +39,7 @@ detail what each program does; this page covers installation and use.
 | `settings/settings_p1.py`, `settings_bdpa.py`, `settings_nox.py` | `/opt/nmrdata/fs_settings/` | Settings for the P1 diamond, BDPA, and m-TinyPol profiles |
 | `settings/buildup_template.py` | `/opt/nmrdata/fs_settings/` | Template for the build-up settings files |
 | `settings/buildup_p1.py`, `buildup_bdpa.py`, `buildup_nox.py` | `/opt/nmrdata/fs_settings/` | Build-up settings for the same samples (set `FREQ` before the first run) |
+| `settings/buildup_p1_freqs.py` | `/opt/nmrdata/fs_settings/` | Build-ups of the P1-diamond sample at four frequencies at 100 K (`FREQS`) |
 | `settings/decay_template.py` | `/opt/nmrdata/fs_settings/` | Template for the decay settings files |
 | `settings/decay_p1.py` | `/opt/nmrdata/fs_settings/` | Decay settings for the P1 diamond at 100 K (set `FREQ` before the first run) |
 | `settings/powdep_template.py` | `/opt/nmrdata/fs_settings/` | Template for the power-dependence settings files |
@@ -163,6 +164,24 @@ polarization and D1 is the build-up time.
    `bu.py` (e.g. to `fsbu.py`) and type that name instead.
 3. The confirmation dialog lists the plan, the mm-wave setting, every D1 with
    its NS, and the expected duration; the expno checks are as for a profile.
+
+### Build-ups at several frequencies
+
+`FREQS` in place of `FREQ` acquires one build-up per frequency in one run, with
+`SERIES = "on"`. An entry is a frequency in GHz, which gets `POWER`, or a
+`(frequency, power)` pair, e.g. `(526.008, 0.147)` for a build-up at lower power.
+`FREQ_ORDER = "by_d1"` (default) acquires, at each D1, one record at every
+frequency in turn, so that a slow drift of the spectrometer affects every
+frequency alike; `"by_freq"` acquires the whole build-up of one frequency, then
+the next. Each frequency is its own set (set k for the k-th entry of `FREQS`;
+with `REPEATS` > 1 the repeats follow as further sets in the same order), the
+expnos run in acquisition order, and `run.txt` lists the frequency and power of
+each set (`# set_cw`). The viewer fits each frequency separately and names the
+series by frequency; with "Error bars: repeats" the mean is over the repeats of
+the same frequency. Writing `D1_LIST` in a mixed order, rather than from short to
+long, keeps a drift from running along the D1 axis of every curve.
+`buildup_p1_freqs.py` is the example: the P1-diamond sample at 100 K, four
+frequencies across the profile, D1 150 to 6000 s in a mixed order, about 12.7 h.
 
 The run folder is in `fs_runs` as for a profile, labelled `bu_<name>`; `run.txt`
 has `# type = buildup` and the D1 of each record, and `settings.txt` lists every
@@ -423,6 +442,9 @@ axis on the right.
   says when S∞ is extrapolated beyond the longest D1.
 - "log D1" makes the D1 axis logarithmic; "normalized" divides each series by
   its fitted S∞, on one axis, to compare the build-up times.
+- A run with several frequencies (`FREQS`) has one series per frequency, named
+  by its frequency (and power, where the powers differ); `values.tsv` lists the
+  frequency and power of each set in its header.
 - The record pane, its settings, "Apply to all records", FID(t0), and the FID
   phase work as for a profile; the window integral is not plotted.
 - "Export: Build-up EPS" writes `buildup.eps` (as shown, same format as the
