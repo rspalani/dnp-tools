@@ -163,17 +163,13 @@ def values_result(path, rtype):
     if rtype in ("buildup", "decay"):
         out = []
         for h in head:
-            m = re.match(r"^(.*?):\s*((?:T_B|T_1)\s[^;]*)(.*)$", h)
-            if m and not h.startswith("fit"):
-                name = m.group(1).strip()
-                t = m.group(2).strip()
-                t2 = re.search(r";\s*(T_2\s[^;]*)", m.group(3))
-                s = "%s: %s" % (name, t) + ((", " + t2.group(1).strip()) if t2 else "")
-                if "not determined" in h:
-                    s += " (not determined)"
-                out.append(s)
-            elif re.match(r"^.*?:\s*no fit:", h):
-                out.append(h)
+            if not re.search(r"\bT_(?:B|1)\s+[\d.]", h) or h.startswith("fit"):
+                if re.match(r"^[^:]{1,40}:\s*no fit:", h):
+                    out.append(h)
+                continue
+            name = h.split(":", 1)[0].strip()
+            ts = ["%s %s" % (k, v.strip()) for k, v in re.findall(r"\b(T_B|T_1|T_2)\s+([\d.][^;]*)", h)]
+            out.append("%s: %s%s" % (name, ", ".join(ts), " (not determined)" if "not determined" in h else ""))
         return "; ".join(out)
     if rtype == "powdep":
         fits = [h for h in head if h.startswith("fit ") or re.match(r"^fit\s+\S+:", h)]
@@ -188,8 +184,11 @@ def values_result(path, rtype):
     k = cols.index(key)
     fcol = cols.index("freq_GHz") if "freq_GHz" in cols else None
     best = None
+    wcol = cols.index("width_MHz") if "width_MHz" in cols else None
     for l in lines[1:]:
         f = l.split("\t")
+        if wcol is not None and len(f) > wcol and f[wcol] in ("0", "0.0", ""):
+            continue                      # the CW reference of a chirp grid
         try:
             v = float(f[k])
         except (ValueError, IndexError):
@@ -400,9 +399,9 @@ HTML_HEAD = """<!doctype html><html><head><meta charset="utf-8"><title>DNP run c
 <style>
 body{font:13px/1.35 system-ui,Segoe UI,Arial,sans-serif;margin:12px;color:#111;background:#fff}
 h1{font-size:18px;margin:0 0 6px} .bar{margin:6px 0 10px} .bar input,.bar select{font:inherit;margin-right:8px}
-table{border-collapse:collapse} th,td{border-bottom:1px solid #ddd;padding:3px 6px;text-align:left;vertical-align:top;white-space:nowrap}
+.wrap{overflow-x:auto} table{border-collapse:collapse} th,td{border-bottom:1px solid #ddd;padding:3px 6px;text-align:left;vertical-align:top;white-space:nowrap}
 th{position:sticky;top:0;background:#f3f3f3;cursor:pointer} td.flags{white-space:normal;max-width:360px;color:#a40}
-td.result{white-space:normal;max-width:380px} tr.approved td.st{color:#070;font-weight:600} tr.discarded{color:#999}
+td.result,td.fq{max-width:260px;overflow:hidden;text-overflow:ellipsis} td.flags{max-width:320px} tr.approved td.st{color:#070;font-weight:600} tr.discarded{color:#999}
 tr.discarded td.flags{color:#c99} .bad{background:#fff3e0} .small{color:#666;font-size:12px}
 </style></head><body>
 <h1>DNP run catalog</h1><div class="small">%s</div>
@@ -411,9 +410,9 @@ Type <select id="ty"><option value="">all</option>%s</select>
 Review <select id="rv"><option value="">all</option><option>unreviewed</option><option>approved</option><option>discarded</option></select>
 <label><input type="checkbox" id="fl"> only flagged</label>
 <label><input type="checkbox" id="hd" checked> hide 'no folder'</label> <span id="n"></span></div>
-<table id="t"><thead><tr>%s</tr></thead><tbody>
+<div class="wrap"><table id="t"><thead><tr>%s</tr></thead><tbody>
 """
-HTML_TAIL = """</tbody></table>
+HTML_TAIL = """</tbody></table></div>
 <script>
 var q=document.getElementById('q'),ty=document.getElementById('ty'),rv=document.getElementById('rv'),
 fl=document.getElementById('fl'),hd=document.getElementById('hd'),rows=[].slice.call(document.querySelectorAll('#t tbody tr'));
@@ -426,8 +425,8 @@ asc=th.dataset.asc!='1';th.dataset.asc=asc?'1':'0';rows.sort(function(x,y){var a
 return (a<c?-1:a>c?1:0)*(asc?1:-1)});rows.forEach(function(r){b.appendChild(r)})})});
 </script></body></html>
 """
-SHOWN = ["review", "type", "date", "dataset", "expnos", "records", "status", "sample", "rotor",
-         "mas_khz", "temp", "freq_GHz", "result", "flags", "run_id"]
+SHOWN = ["review", "run_id", "type", "date", "dataset", "expnos", "records", "status", "rotor",
+         "mas_khz", "temp", "sample", "freq_GHz", "result", "flags"]
 
 
 def write_outputs(rows, out_dir, sources):
@@ -447,7 +446,7 @@ def write_outputs(rows, out_dir, sources):
                      % (e(r["review"]), e(r["type"]), e(r["review"]), e(r["status"]), "1" if r["flags"] else "0"))
             for c in SHOWN:
                 v = r[c]
-                cls = {"review": "st", "flags": "flags", "result": "result"}.get(c, "")
+                cls = {"review": "st", "flags": "flags", "result": "result", "freq_GHz": "fq"}.get(c, "")
                 if c in ("rotor", "mas_khz", "temp") and r.get(c) and (
                         (c == "rotor" and r["rotor_runtxt"] and r["rotor_runtxt"] != r["rotor"]) or
                         (c == "mas_khz" and r["mas_runtxt"] and r["mas_runtxt"] != r["mas_khz"]) or
@@ -459,7 +458,7 @@ def write_outputs(rows, out_dir, sources):
                     v = '<a href="file:///%s">%s</a>' % (e(r["folder"].replace("\\", "/").lstrip("/")), e(v))
                     fh.write('<td class="%s">%s</td>' % (cls, v))
                 else:
-                    fh.write('<td class="%s">%s</td>' % (cls, e(v)))
+                    fh.write('<td class="%s" title="%s">%s</td>' % (cls, e(v), e(v)))
             fh.write("</tr>\n")
         fh.write(HTML_TAIL)
 
