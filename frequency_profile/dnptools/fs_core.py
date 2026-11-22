@@ -193,7 +193,24 @@ INDEX_PATH    = "/opt/nmrdata/fs_runs.tsv"      # common index, one line per run
 RUNS_SUBDIR   = "fs_runs"                       # run folders, inside each dataset
 SETTINGS_DIR  = "/opt/nmrdata/fs_settings"      # settings_<name>.py files
 POWER_CAL_PATH  = DNPTOOLS + "/awg_power_cal.txt"   # drive voltage (mV) -> source power (mW)
+VERSION_PATH    = DNPTOOLS + "/VERSION"         # written by deploy/update.sh: the deployed commit
 MAX_AWG_VOLTAGE = 0.4                           # full drive: the largest second argument of 'cw'
+
+
+
+def code_version():
+    """The deployed code version: the first line of VERSION_PATH, written by
+    deploy/update.sh (commit, its date, and when it was installed). Copied into
+    every run.txt as '# code_version', so a run can be traced to its code."""
+    try:
+        fh = open(VERSION_PATH)
+        try:
+            line = fh.readline().strip()
+        finally:
+            fh.close()
+        return line.replace("\t", " ") or "unknown (VERSION is empty)"
+    except CATCH:
+        return "unknown (no %s)" % VERSION_PATH
 
 # ---- Settings: (name, default) ------------------------------------------------
 REQUIRED = "<required>"
@@ -2260,6 +2277,7 @@ def run_records(c, job, source):
 
     def run_file_header():
         text = job["header"](run_id, ds_root, peak_str, now_str())
+        text = text.replace("# columns:", "# code_version = %s\n# columns:" % code_version(), 1)
         if off_ref_path:
             text = text.replace("# columns:", "# off_ref = %s\n# columns:" % off_ref_path, 1)
         run_file_write(text, 'w')
