@@ -62,6 +62,14 @@ else
         git status --short --untracked-files=no
         die "files in $REPO were edited by hand (listed above). Copy anything you need, then: git -C $REPO checkout -- ."; }
     git fetch -q origin "$BRANCH" || die "git fetch failed (network?)"
+    # If GitHub has a newer version of this script, run that one instead, so that an
+    # update (and its dry run) always uses the update script that matches the new code.
+    if [ -z "${DNP_UPDATE_REEXEC:-}" ] && ! git diff --quiet HEAD "origin/$BRANCH" -- deploy/update.sh; then
+        newscript=$(mktemp) && git show "origin/$BRANCH:deploy/update.sh" > "$newscript" \
+            || die "could not read the new update.sh from origin/$BRANCH"
+        echo "(update.sh itself changed on GitHub; running the new version)"
+        DNP_UPDATE_REEXEC=1 exec bash "$newscript" "$@"
+    fi
     new=$(git rev-list --count HEAD..origin/$BRANCH)
     if [ "$new" -gt 0 ]; then
         echo "$new new commit(s) on GitHub:"
