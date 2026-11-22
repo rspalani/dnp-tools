@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fs_plot.py  -  plot a DNP frequency profile from a run file of fs_core.py
+dnp_viewer.py  -  plot a DNP frequency profile from a run file of dnp_core.py
 (system Python 3.6+, numpy, matplotlib; tkinter for the window)
 
-    python3 fs_plot.py RUNFILE [--ppm 37] [--width 20] [--mode extreme|max|sum|FID(t0)]
+    python3 dnp_viewer.py RUNFILE [--ppm 37] [--width 20] [--mode extreme|max|sum|FID(t0)]
                                [--interval 15] [--once] [--csv]
 
-RUNFILE is <dataset>/fs_runs/<run id>/run.txt, written by the acquisition
-scripts (fs_p1.py, fs_bdpa.py, fs_nox.py through /opt/dnptools/fs_core.py).
+RUNFILE is <dataset>/dnp_runs/<run id>/run.txt, written by the acquisition
+scripts (fs_p1.py, fs_bdpa.py, fs_nox.py through /opt/dnptools/dnp_core.py).
 Run files of the earlier scripts, <dataset>/fs_<name>_live_run_<START_EXPNO>.txt,
 are read as well. For every record listed in the run file, the script reads the
 processed spectrum (pdata/1/1r, 1i and procs) and NS (acqus), and takes one
@@ -24,8 +24,8 @@ is plotted as I_on/I_off - 1, each set (REPEATS > 1) against the start OFF of
 the same set; otherwise as intensity per scan. End OFFs are reported relative
 to the start OFF of their set.
 
-The expnos are looked for in the dataset that contains the fs_runs folder, so
-a dataset copied or moved together with its fs_runs folder is read from its
+The expnos are looked for in the dataset that contains the dnp_runs folder, so
+a dataset copied or moved together with its dnp_runs folder is read from its
 new place; for an older run file, in dataset_dir from the run file.
 
 The defaults for --ppm, --width and --mode come from the run file. The plot is
@@ -46,7 +46,7 @@ Window: profile, spectrum side, and controls
     Above the profile, the status of the run: a blinking red dot with
     'Experiment running' while the run goes on (with the record reached out of
     those planned, from settings.txt in the run folder, and the expected end),
-    'Finished' when fs_core.py has written '# end: complete', 'Stopped before
+    'Finished' when dnp_core.py has written '# end: complete', 'Stopped before
     the end' in red when the run was aborted or stopped from TopSpin, and an
     amber 'No new record for N min' when the run file has no end line but has
     not grown for much longer than usual. 'Live' refreshes the window every
@@ -156,7 +156,7 @@ CSV export
     rewritten whenever the PNG and TSV are.
 
 Build-up runs
-    A run file with '# type = buildup' (written by bu.py through fs_core.py) has
+    A run file with '# type = buildup' (written by bu.py through dnp_core.py) has
     one record per build-up time D1 (eighth column), ON (microwaves on) or OFF.
     The window and plot.png then show the intensity per scan (or FID(t0) per
     NS*RG) of the ON and OFF records against D1, each series of each set with a
@@ -188,7 +188,7 @@ Build-up runs
     frequency.
 
 Decay runs
-    A run file with '# type = decay' (written by decay.py through fs_core.py) has a
+    A run file with '# type = decay' (written by decay.py through dnp_core.py) has a
     reference record with the microwaves on, acquired at the end of the polarization,
     and the decay records after the microwaves went off, each with its time t after
     'stop' (ninth column; the target time in the tenth). The window and plot.png then
@@ -1003,7 +1003,7 @@ def window_desc(center, width):
 
 
 # Phase file ---------------------------------------------------------------
-RUN_FILE_NAME = "run.txt"     # run file inside a run folder <dataset>/fs_runs/<run id>/
+RUN_FILE_NAME = "run.txt"     # run file inside a run folder <dataset>/dnp_runs/<run id>/
 
 
 def is_run_folder_layout(runpath):
@@ -1050,9 +1050,9 @@ def run_label(runpath):
 
 
 def dataset_dir(runpath, meta):
-    """The dataset holding the run's expnos. For run.txt in <dataset>/fs_runs/<run id>/
+    """The dataset holding the run's expnos. For run.txt in <dataset>/dnp_runs/<run id>/
     this is the folder two levels up, so a dataset that was moved or copied (with its
-    fs_runs folder) is still found; otherwise dataset_dir from the run file, or the
+    dnp_runs folder) is still found; otherwise dataset_dir from the run file, or the
     run file's own folder."""
     if is_run_folder_layout(runpath):
         up = os.path.dirname(os.path.dirname(os.path.dirname(runpath)))
@@ -1122,8 +1122,8 @@ def write_phase_file(path, ph, runpath):
         window = ("window_center = %s\nwindow_width = %s\nmode = %s\n"
                   % (v(ph["center"]), v(ph["width"]), ph["mode"]))
     text = (
-        "# viewer settings for run %s, written by fs_plot.py at %s\n"
-        "# fs_plot.py multiplies 1r + i*1i of every record processed with PHC0 = base_phc0\n"
+        "# viewer settings for run %s, written by dnp_viewer.py at %s\n"
+        "# dnp_viewer.py multiplies 1r + i*1i of every record processed with PHC0 = base_phc0\n"
         "# and PHC1 = base_phc1 by exp(i*phi), phi = ph0 + ph1*(k/SI - u_pivot) (deg),\n"
         "# k = 0 at OFFSET, u_pivot = (OFFSET - pivot_ppm)*SF/SW_p; with magnitude = 1 it\n"
         "# uses |1r + i*1i| instead; with baseline = 1 it subtracts a polynomial of order\n"
@@ -2241,7 +2241,7 @@ def write_decay_eps(path, a, aspect=None):
 # --------------------------------------------------------------------------
 # Power-dependence runs: the enhancement against the mm-wave power at one frequency
 # --------------------------------------------------------------------------
-POWDEP_FULL_V = 0.4                    # full drive (MAX_AWG_VOLTAGE in fs_core.py)
+POWDEP_FULL_V = 0.4                    # full drive (MAX_AWG_VOLTAGE in dnp_core.py)
 POWDEP_MODELS = OrderedDict([("saturation", "saturation curve"), ("none", "no fit")])
 POWDEP_SHORT = {"saturation": "saturation", "none": "none"}
 POWDEP_H_RANGE = (1e-3, 1e3)           # P_half is searched in this range (fractions of full power)
@@ -2259,7 +2259,7 @@ def powdep_formula(offset, ascii_only=False):
 
 def mono_slopes(xs, ys):
     """Slopes at the points for a monotone piecewise-cubic (Fritsch-Carlson, as PCHIP)
-    interpolation of increasing data; the same as in fs_core.py."""
+    interpolation of increasing data; the same as in dnp_core.py."""
     n = len(xs)
     h = [xs[i + 1] - xs[i] for i in range(n - 1)]
     d = [(ys[i + 1] - ys[i]) / h[i] for i in range(n - 1)]
@@ -3394,7 +3394,7 @@ class Analyzer:
                 "; ".join([x for x in (f.get("note", ""), inote) if x])])
         n = a["fid_n"]
         head = [
-            "fs_plot.py records of run %s, written %s" % (run_label(self.runpath),
+            "dnp_viewer.py records of run %s, written %s" % (run_label(self.runpath),
                                                          time.strftime("%Y-%m-%d %H:%M:%S")),
             "fid_t0_*: |fid| at t0 divided by NS*RG, from the N = %d complex points c[g:g+N], "
             "g = ceil(GRPDLY); mean = mean |c|, fit = straight line fitted to |c| against the point "
@@ -3529,7 +3529,7 @@ def spectrum_status(a):
 
 
 def run_plan(runpath):
-    """(first, last) planned expno from settings.txt in the run folder (written by fs_core.py),
+    """(first, last) planned expno from settings.txt in the run folder (written by dnp_core.py),
     or None (older run files have none)."""
     if not is_run_folder_layout(runpath):
         return None
@@ -4968,7 +4968,7 @@ def save_window_state(geometry, frac, spectrum):
             os.makedirs(d)
         tmp = WINDOW_FILE + ".tmp"
         with open(tmp, "w") as fh:
-            fh.write("# size and position of the last fs_plot.py window that was closed\n"
+            fh.write("# size and position of the last dnp_viewer.py window that was closed\n"
                      "geometry = %s\nprofile_fraction = %.3f\nspectrum = %d\n"
                      % (geometry, frac, 1 if spectrum else 0))
         os.replace(tmp, WINDOW_FILE)
@@ -5047,7 +5047,7 @@ class MainWindow:
         self.models = (list(DECAY_MODELS) if self.decay else list(POWDEP_MODELS) if self.powdep
                        else list(FIT_MODELS))
         self.root = tk.Tk()
-        self.root.title("fs_plot - %s  |  %s" % (run_label(runpath), reopen))
+        self.root.title("dnp_viewer - %s  |  %s" % (run_label(runpath), reopen))
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         saved = load_window_state()
         self.profile_frac = saved["profile_fraction"]
@@ -6543,7 +6543,7 @@ def mode_arg(text):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Plot a DNP frequency profile or build-up from a run file (fs_runs/<run id>/run.txt).")
+    ap = argparse.ArgumentParser(description="Plot a DNP frequency profile or build-up from a run file (dnp_runs/<run id>/run.txt).")
     ap.add_argument("runfile")
     ap.add_argument("--ppm", type=float, default=None, help="window centre in ppm (default: from run file)")
     ap.add_argument("--width", type=float, default=None, help="full window width in ppm (default: from run file)")
@@ -6557,10 +6557,10 @@ def main():
 
     runpath = os.path.abspath(args.runfile)
     if not os.path.exists(runpath):
-        sys.exit("fs_plot.py: run file not found: %s" % runpath)
+        sys.exit("dnp_viewer.py: run file not found: %s" % runpath)
     png, tsv, _ = output_paths(runpath)
     reopen = reopen_command(runpath, args)
-    print("[%s] fs_plot.py: %s\n    reopen with: %s"
+    print("[%s] dnp_viewer.py: %s\n    reopen with: %s"
           % (time.strftime("%Y-%m-%d %H:%M:%S"), runpath, reopen))
     sys.stdout.flush()
 
@@ -6568,12 +6568,12 @@ def main():
     win = None
     if not args.once and os.environ.get("DISPLAY"):
         if tk is None:
-            print("fs_plot.py: tkinter is not installed; writing the PNG and TSV only")
+            print("dnp_viewer.py: tkinter is not installed; writing the PNG and TSV only")
         else:
             try:
                 win = MainWindow(runpath, args, analyzer, reopen, png, tsv)
             except Exception as ex:
-                print("fs_plot.py: could not open a window (%s); writing the PNG and TSV only" % ex)
+                print("dnp_viewer.py: could not open a window (%s); writing the PNG and TSV only" % ex)
         sys.stdout.flush()
     if win is not None:
         win.run()

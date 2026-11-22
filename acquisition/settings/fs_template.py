@@ -1,7 +1,7 @@
-# settings_template.py  -  template for the settings files of fs.py
+# fs_template.py  -  template for the settings files of fs.py
 #
 # To set up a new kind of experiment, copy this file in the same folder:
-#     cp /opt/nmrdata/fs_settings/settings_template.py /opt/nmrdata/fs_settings/settings_<name>.py
+#     cp /opt/nmrdata/dnp_settings/fs_template.py /opt/nmrdata/dnp_settings/fs_<name>.py
 # fill in the values, and run it from TopSpin's command line with
 #     fs <name>
 # ('fs' alone lists the settings files to choose from). This template itself is
@@ -12,14 +12,14 @@
 # settings; an UPPERCASE name that is not a known setting stops the run before
 # anything starts, so typos are caught. Use lowercase names for your own helper
 # variables, such as frequency segments. Settings left out take the defaults
-# listed in /opt/dnptools/fs_core.py (SETTINGS).
+# listed in /opt/dnptools/dnp_core.py (SETTINGS).
 #
-# Each run is recorded in <dataset>/fs_runs/<start time>_<RUN_LABEL>_e<START_EXPNO>/
+# Each run is recorded in <dataset>/dnp_runs/<RUN_LABEL>_<type>_<start time>_e<START_EXPNO>/
 # (run.txt, log.txt, a copy of this file, settings.txt with every value as used,
-# and the viewer's files) and listed in /opt/nmrdata/fs_runs.tsv.
+# and the viewer's files) and listed in /opt/nmrdata/dnp_runs.tsv.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# <name> from the file name settings_<name>.py.
+# <name> from the file name fs_<name>.py.
 #RUN_LABEL = "name"
 
 SAMPLE   = "sample description"          # shown in the dialog, the titles and the plot
@@ -87,12 +87,12 @@ MAX_CONSEC_SKIPS = 3   # ON points skipped in a row (failed 'cw') before the run
 # before the next AWG command. Set to [] for no processing.
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme": largest |value| in the window, sign kept
                              # "max"    : largest value (for magnitude spectra, 'mc')
                              # "sum"    : sum of the points in the window
-LAUNCH_VIEWER   = True       # start fs_plot.py in the background when the run starts
+LAUNCH_VIEWER   = True       # start dnp_viewer.py in the background when the run starts
 RESPAWN_VIEWER  = True       # after each record, start it again if no viewer for this
                              # run is running (e.g. its window was closed)

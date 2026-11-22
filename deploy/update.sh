@@ -11,16 +11,23 @@
 #   3. copies the programs to /opt/dnptools and the TopSpin commands to TopSpin,
 #      keeping each replaced file in /opt/dnptools/backup/<date>/,
 #   4. never overwrites the site files: awg_cmd.py (AWG address), awg_power_cal.txt,
-#      and the settings files in /opt/nmrdata/fs_settings (new ones are added),
-#   5. writes /opt/dnptools/VERSION, which every new run copies into run.txt.
+#      and the settings files in /opt/nmrdata/dnp_settings (new ones are added),
+#   5. copies the settings files of the old folder /opt/nmrdata/fs_settings into
+#      dnp_settings under their new names (settings_<name>.py -> fs_<name>.py,
+#      buildup_<name>.py -> bu_<name>.py, the others unchanged), with their dates,
+#      unless dnp_settings already has that name; fs_settings itself is not changed,
+#   6. writes /opt/dnptools/VERSION, which every new run copies into run.txt.
+# Each backup folder gets restore.sh, which puts the replaced files back (rollback).
 # The paths can be changed with environment variables (for testing).
 
 set -u
 REPO="${DNP_REPO:-/home/nmrsu/src/dnp-tools}"
 OPT="${DNP_OPT:-/opt/dnptools}"
 TOPSPIN_USER="${DNP_TOPSPIN_USER:-/opt/topspin3.6.2/exp/stan/nmr/py/user}"
-SETTINGS="${DNP_SETTINGS:-/opt/nmrdata/fs_settings}"
-INDEX="${DNP_INDEX:-/opt/nmrdata/fs_runs.tsv}"
+SETTINGS="${DNP_SETTINGS:-/opt/nmrdata/dnp_settings}"
+OLD_SETTINGS="${DNP_OLD_SETTINGS:-/opt/nmrdata/fs_settings}"
+INDEX="${DNP_INDEX:-/opt/nmrdata/dnp_runs.tsv}"
+OLD_INDEX="${DNP_OLD_INDEX:-/opt/nmrdata/fs_runs.tsv}"
 MONITOR="${DNP_MONITOR:-/opt/dnptools/dnp_monitor}"
 SUDO="${DNP_SUDO-sudo}"
 URL="https://github.com/rspalani/dnp-tools.git"
@@ -31,7 +38,7 @@ for a in "$@"; do
     case "$a" in
         --dry-run) DRY=1 ;;
         --force)   FORCE=1 ;;
-        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "unknown option: $a"; exit 2 ;;
     esac
 done
@@ -67,12 +74,12 @@ else
     fi
 fi
 cd "$REPO" || die "cannot enter $REPO"
-SRC="$REPO/frequency_profile"
+SRC="$REPO/acquisition"
 if [ $DRY -eq 1 ]; then
     # compare against what is on GitHub without touching the clone
     TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
     git archive "origin/$BRANCH" | tar -x -C "$TMP"
-    SRC="$TMP/frequency_profile"; MON_SRC="$TMP"
+    SRC="$TMP/acquisition"; MON_SRC="$TMP"
     COMMIT=$(git rev-parse --short origin/$BRANCH); CDATE=$(git log -1 --format=%cd --date=short origin/$BRANCH)
 else
     MON_SRC="$REPO"
@@ -82,8 +89,9 @@ fi
 # ---- 2. no update during a run ------------------------------------------------------
 # A run writes 'start' to the index when it begins and 'end' when it ends; a run_id
 # with a start and no end in the last 200 lines is taken as running.
-if [ -r "$INDEX" ]; then
-    running=$(tail -n 200 "$INDEX" | awk -F'\t' '$1 !~ /^#/ {if ($2=="start") s[$4]=$1; else if ($2=="end") delete s[$4]}
+for idx in "$OLD_INDEX" "$INDEX"; do
+[ -r "$idx" ] || continue
+    running=$(tail -n 200 "$idx" | awk -F'\t' '$1 !~ /^#/ {if ($2=="start") s[$4]=$1; else if ($2=="end") delete s[$4]}
                                               END {for (r in s) print "    " r " (started " s[r] ")"}')
     if [ -n "$running" ]; then
         echo "These runs have started and not ended (or ended without writing to the index):"
@@ -92,14 +100,17 @@ if [ -r "$INDEX" ]; then
             die "update after the run, or with --force if none is really running"
         fi
     fi
-fi
+done
 
 # ---- 3./4. install ------------------------------------------------------------------
 BACKUP="$OPT/backup/$(date +%Y%m%d-%H%M%S)"
 changed=0
+copied=" "     # names of the settings files copied from the old folder
 install_file() {   # install_file SRC DEST_DIR [keep]   keep: never overwrite an existing file
     local src="$1" dir="$2" keep="${3:-}" dest="$2/$(basename "$1")"
     if [ -e "$dest" ] && cmp -s "$src" "$dest"; then return; fi
+    # a site settings file copied (or, in a dry run, to be copied) from the old folder
+    if [ "$keep" = keep ] && [[ "$copied" == *" $(basename "$src") "* ]]; then return; fi
     if [ -e "$dest" ] && [ "$keep" = keep ]; then
         echo "  kept (site file): $dest"; return
     fi
@@ -108,15 +119,40 @@ install_file() {   # install_file SRC DEST_DIR [keep]   keep: never overwrite an
     [ $DRY -eq 1 ] && return
     if [ -e "$dest" ]; then
         $SUDO mkdir -p "$BACKUP" && $SUDO cp -p "$dest" "$BACKUP/" || die "could not back up $dest"
+        [ -e "$BACKUP/restore.sh" ] || printf '#!/bin/bash\n# puts back the files this update replaced: sudo bash %s\nset -e\n' \
+            "$BACKUP/restore.sh" | $SUDO tee "$BACKUP/restore.sh" >/dev/null
+        printf 'cp -p %q %q && echo "restored %s"\n' "$BACKUP/$(basename "$dest")" "$dest" "$dest" \
+            | $SUDO tee -a "$BACKUP/restore.sh" >/dev/null
     fi
     $SUDO mkdir -p "$dir" && $SUDO cp "$src" "$dest" && $SUDO chmod a+r "$dest" || die "could not write $dest"
 }
 
 echo "installing $COMMIT ($CDATE):"
-for f in fs_core.py fs_plot.py fs_rephase_core.py; do install_file "$SRC/dnptools/$f" "$OPT"; done
+for f in dnp_core.py dnp_viewer.py dnp_rephase_core.py; do install_file "$SRC/dnptools/$f" "$OPT"; done
 install_file "$SRC/dnptools/awg_cmd.py" "$OPT" keep
 install_file "$SRC/dnptools/awg_power_cal.txt" "$OPT" keep
 for f in "$SRC"/topspin/*.py; do install_file "$f" "$TOPSPIN_USER"; done
+# settings: first the site's own files from the old folder, under their new names
+if [ -d "$OLD_SETTINGS" ]; then
+    for f in "$OLD_SETTINGS"/*.py; do
+        [ -f "$f" ] || continue
+        b=$(basename "$f")
+        case "$b" in
+            settings_*) n="fs_${b#settings_}" ;;
+            buildup_*)  n="bu_${b#buildup_}" ;;
+            *)          n="$b" ;;
+        esac
+        dest="$SETTINGS/$n"
+        if [ -e "$dest" ]; then
+            cmp -s "$f" "$dest" || echo "  kept (already in $SETTINGS, differs from $f): $n"
+            continue
+        fi
+        changed=$((changed + 1)); copied="$copied$n "
+        echo "  copy:   $f -> $dest"
+        [ $DRY -eq 1 ] && continue
+        $SUDO mkdir -p "$SETTINGS" && $SUDO cp -p "$f" "$dest" || die "could not copy $f to $dest"
+    done
+fi
 for f in "$SRC"/settings/*.py; do install_file "$f" "$SETTINGS" keep; done
 mon_before=$changed
 for f in dnp_monitor.py dnp_logviewer.py; do install_file "$MON_SRC/$f" "$MONITOR"; done
@@ -129,7 +165,12 @@ if [ $DRY -eq 1 ]; then
     echo "$changed file(s) would change; VERSION would be: $line"
     exit 0
 fi
+if [ -d "$BACKUP" ] && [ -e "$OPT/VERSION" ]; then   # so that restore.sh also puts back the old VERSION
+    $SUDO cp -p "$OPT/VERSION" "$BACKUP/VERSION" &&
+    printf 'cp -p %q %q && echo "restored %s"\n' "$BACKUP/VERSION" "$OPT/VERSION" "$OPT/VERSION" \
+        | $SUDO tee -a "$BACKUP/restore.sh" >/dev/null
+fi
 echo "$line" | $SUDO tee "$OPT/VERSION" >/dev/null && $SUDO chmod a+r "$OPT/VERSION" || die "could not write $OPT/VERSION"
 echo "$changed file(s) changed; $OPT/VERSION = $line"
-[ $changed -gt 0 ] && [ -d "$BACKUP" ] && echo "replaced files kept in $BACKUP"
+[ $changed -gt 0 ] && [ -d "$BACKUP" ] && echo "replaced files kept in $BACKUP; to undo: sudo bash $BACKUP/restore.sh"
 [ $changed -gt 0 ] && echo "A viewer that is open keeps the old code: close it and reopen it."

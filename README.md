@@ -6,7 +6,7 @@ Bitter Magnet Laboratory):
 | Part | What it is |
 |---|---|
 | [DNP monitor](#dnp-monitor) (`dnp_monitor.py`, `dnp_logviewer.py`) | MAS, temperature, and LN2 monitoring and logging; described below |
-| [`frequency_profile/`](frequency_profile/) | DNP frequency profiles and build-ups: TopSpin acquisition scripts that step the mm-wave frequency (`fs`) or the build-up time D1 (`bu`), a live viewer with build-up fits, and post-run phasing; see [its README](frequency_profile/README.md) |
+| [`acquisition/`](acquisition/) | DNP frequency profiles and build-ups: TopSpin acquisition scripts that step the mm-wave frequency (`fs`) or the build-up time D1 (`bu`), a live viewer with build-up fits, and post-run phasing; see [its README](acquisition/README.md) |
 
 ## DNP monitor
 
@@ -96,7 +96,7 @@ bash /home/nmrsu/src/dnp-tools/deploy/update.sh
 
 installs the latest `main` of everything in this repository: the monitor, the
 viewer, and the acquisition scripts (see
-[frequency_profile/README.md](frequency_profile/README.md#installation-and-updates)).
+[acquisition/README.md](acquisition/README.md#installation-and-updates)).
 If it reports that the monitor changed, close the monitor (its window) and start it
 again with `dnp_monitor`.
 

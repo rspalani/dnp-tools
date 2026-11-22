@@ -1,11 +1,11 @@
-# buildup_p1_freqs.py  -  settings for bu.py: DNP build-ups of the P1-diamond powder sample at
+# bu_p1_freqs.py  -  settings for bu.py: DNP build-ups of the P1-diamond powder sample at
 # several mm-wave frequencies, at 100 K
 #
 # Run in TopSpin with:   bu p1_freqs
 # Check FREQS, the dataset, START_EXPNO and the template expno before each run; the
 # confirmation dialog shows them in large type, with the expnos and the total time. The
 # template's pulse program must saturate before D1 (the same template as the 100 K build-up
-# at 526.008 GHz, with its receiver gain). buildup_template.py explains every setting.
+# at 526.008 GHz, with its receiver gain). bu_template.py explains every setting.
 #
 # One build-up per frequency in FREQS, interleaved (FREQ_ORDER "by_d1"): at each D1, one
 # record at every frequency in turn, so that a slow drift of the spectrometer over the run
@@ -13,8 +13,8 @@
 # ('Fit' and 'normalized' compare the build-up times directly).
 
 # Short name used in the run folder name and the index. Leave it out to use
-# bu_<name> from the file name buildup_<name>.py.
-#RUN_LABEL = "bu_name"
+# <name> from the file name bu_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "Diamond P1 center"
 MAS_INFO = "13 kHz MAS, 1.3 mm diamond(c-1-3) rotor, 100 K"
@@ -83,12 +83,12 @@ MAX_CONSEC_SKIPS = 3   # ON records skipped in a row (failed 'cw') before the ru
 # before the next AWG command. Set to [] for no processing.
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 26.0       # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 30.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme": largest |value| in the window, sign kept
                              # "max"    : largest value (for magnitude spectra, 'mc')
                              # "sum"    : sum of the points in the window
-LAUNCH_VIEWER   = True       # start fs_plot.py in the background when the run starts
+LAUNCH_VIEWER   = True       # start dnp_viewer.py in the background when the run starts
 RESPAWN_VIEWER  = True       # after each record, start it again if no viewer for this
                              # run is running (e.g. its window was closed)

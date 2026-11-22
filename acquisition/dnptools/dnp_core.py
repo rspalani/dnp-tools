@@ -1,25 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-fs_core.py  -  shared acquisition code for the DNP frequency-profile, build-up,
+dnp_core.py  -  shared acquisition code for the DNP frequency-profile, build-up,
 and decay scripts (TopSpin / Jython)
 
 Not run directly. The TopSpin script fs.py (in TopSpin's py/user folder) runs
-    execfile("/opt/dnptools/fs_core.py")
+    execfile("/opt/dnptools/dnp_core.py")
     run_settings(sys.argv[1:])
 execfile is used instead of import so that TopSpin always runs the current
 version of this file; an imported module can stay cached in TopSpin's Jython
 until TopSpin is restarted.
 
-Settings files: one per kind of experiment, in /opt/nmrdata/fs_settings, named
-settings_<name>.py; a new one is made by copying settings_template.py there.
-'fs bdpa' (or 'fs settings_bdpa') on TopSpin's command line uses
-settings_bdpa.py; 'fs' alone lists the settings files to choose from, which is
+Settings files: one per kind of experiment, in /opt/nmrdata/dnp_settings, named
+<type>_<name>.py (fs_, bu_, decay_, powdep_, chirp2d_); a new one is made by copying
+<type>_template.py there. The older names settings_<name>.py (fs) and buildup_<name>.py
+(bu) are still found, with a note naming the new name; a file only in the old folder
+/opt/nmrdata/fs_settings is not run (the message says what to copy where).
+'fs bdpa' (or 'fs fs_bdpa') on TopSpin's command line uses
+fs_bdpa.py; 'fs' alone lists the settings files to choose from, which is
 also what happens if TopSpin does not pass the name on to the script. A
 settings file is Python: plain assignments, run with frange() available. Its
 UPPERCASE names are settings (list and defaults in SETTINGS below); an
 UPPERCASE name that is not in the list stops the script, because it is
 usually a typo. Lowercase names, such as frequency segments, are ignored.
-RUN_LABEL defaults to <name>. settings_template.py itself is not run.
+RUN_LABEL defaults to <name>. The template itself is not run.
 
 Dataset and template: DATA_DIR, DATA_NAME and TEMPLATE_EXPNO set in the
 settings file are used. If DATA_DIR and DATA_NAME are both empty, the dataset open in TopSpin
@@ -36,21 +39,24 @@ OFF_MODE. Every set occupies a fixed block of expnos from START_EXPNO on; a
 point that cannot be set on the AWG is skipped and its expno is left empty.
 
 Records: each run gets a folder inside the dataset,
-    <DATA_DIR>/<DATA_NAME>/fs_runs/<YYYYMMDD-HHMMSS>_<RUN_LABEL>_e<START_EXPNO>/
-named after the time the run started. It holds run.txt (one line per finished
-record, read by fs_plot.py and fs_rephase.py), log.txt (every step,
+    <DATA_DIR>/<DATA_NAME>/dnp_runs/<RUN_LABEL>_<type>_<YYYYMMDD-HHMMSS>_e<START_EXPNO>/
+named after the label, the type (fs, bu, decay, powdep, chirp2d) and the time the
+run started, e.g. p1_bu_20261122-210455_e600. Runs from before November 2026 are in
+<dataset>/fs_runs/<YYYYMMDD-HHMMSS>_<RUN_LABEL>_e<START_EXPNO>/; the viewer reads both. It holds run.txt (one line per finished
+record, read by dnp_viewer.py and fs_rephase.py), log.txt (every step,
 time-stamped), a copy of the settings file, settings.txt (every setting as
 used, including the full frequency list), and the viewer's files (viewer.log, plot.png, values.tsv,
 phase.txt). Because the folder is inside the dataset, it is copied with it.
-One line is also appended to the common index /opt/nmrdata/fs_runs.tsv when a
-run starts and one when it ends.
+One line is also appended to the common index /opt/nmrdata/dnp_runs.tsv when a
+run starts and one when it ends; its last column is the type. (The index of the
+older runs is /opt/nmrdata/fs_runs.tsv, which is no longer written.)
 
-Live plot: the viewer fs_plot.py (system Python 3) is started in the
+Live plot: the viewer dnp_viewer.py (system Python 3) is started in the
 background. It reads run.txt and the processed spectra (pdata/1/1r, 1i) and
 plots the intensity per scan, or I_on/I_off - 1 when start OFFs are recorded,
 against frequency, one series per set. Closing the viewer does not affect the
 run; it can be reopened at any time with the command printed in the log, e.g.
-    python3 /opt/dnptools/fs_plot.py <run folder>/run.txt
+    python3 /opt/dnptools/dnp_viewer.py <run folder>/run.txt
 With RESPAWN_VIEWER = True, each time a record is added to run.txt, pgrep is
 used to check whether a viewer for this run is running, and one is started if
 not; a viewer closed during a record reappears once that record has been
@@ -74,8 +80,8 @@ further records.
 
 If the script is stopped from TopSpin, mm-wave 'stop' is sent and run.txt
 ends with '# end: stopped: interrupted ...'.
-Build-up runs (TopSpin script bu.py): 'bu p1' runs buildup_p1.py from the same
-folder, 'bu' alone lists the buildup_*.py files, and buildup_template.py is the
+Build-up runs (TopSpin script bu.py): 'bu p1' runs bu_p1.py from the same
+folder, 'bu' alone lists the bu_*.py files, and bu_template.py is the
 template. A build-up run acquires one record per build-up time D1, either at
 one mm-wave frequency (FREQ and POWER; 'cw' is sent to the AWG before each ON
 record) or with the microwaves off ('stop' before each OFF record). The pulse
@@ -97,7 +103,7 @@ polarization. The settings that differ from a profile:
     FREQ_ORDER   with FREQS: "by_d1" (at each D1, every frequency in turn; default) or
                  "by_freq" (one whole build-up after the other); expnos in acquisition order
 Template, expno checks, timing, run folder, index and viewer are as for a
-profile. The run folder is in fs_runs as well, labelled bu_<name> unless
+profile. The run folder is in dnp_runs as well, <name>_bu_<time>_e<expno> unless
 RUN_LABEL is set; run.txt has '# type = buildup' and an eighth column with D1
 (s), and settings.txt lists every planned record with its expected duration.
 
@@ -188,10 +194,11 @@ DNPTOOLS      = "/opt/dnptools"
 AWG_PYTHON    = "python"                        # interpreter that runs awg_cmd.py
 AWG_CMD_PATH  = DNPTOOLS + "/awg_cmd.py"
 VIEWER_PYTHON = "/usr/bin/python3"
-VIEWER_PATH   = DNPTOOLS + "/fs_plot.py"
-INDEX_PATH    = "/opt/nmrdata/fs_runs.tsv"      # common index, one line per run start and end
-RUNS_SUBDIR   = "fs_runs"                       # run folders, inside each dataset
-SETTINGS_DIR  = "/opt/nmrdata/fs_settings"      # settings_<name>.py files
+VIEWER_PATH   = DNPTOOLS + "/dnp_viewer.py"
+INDEX_PATH    = "/opt/nmrdata/dnp_runs.tsv"      # common index, one line per run start and end
+RUNS_SUBDIR   = "dnp_runs"                       # run folders, inside each dataset
+SETTINGS_DIR  = "/opt/nmrdata/dnp_settings"      # <type>_<name>.py files
+OLD_SETTINGS_DIR = "/opt/nmrdata/fs_settings"   # before November 2026; checked, never run
 POWER_CAL_PATH  = DNPTOOLS + "/awg_power_cal.txt"   # drive voltage (mV) -> source power (mW)
 VERSION_PATH    = DNPTOOLS + "/VERSION"         # written by deploy/update.sh: the deployed commit
 MAX_AWG_VOLTAGE = 0.4                           # full drive: the largest second argument of 'cw'
@@ -215,7 +222,7 @@ def code_version():
 # ---- Settings: (name, default) ------------------------------------------------
 REQUIRED = "<required>"
 SETTINGS = [
-    ("RUN_LABEL",        REQUIRED),   # short name in the run id; default: <name> of settings_<name>.py
+    ("RUN_LABEL",        REQUIRED),   # short name in the run id; default: <name> of fs_<name>.py
     ("SAMPLE",           ""),
     ("MAS_INFO",         ""),
     ("DATA_DIR",         ""),         # "" (with DATA_NAME "") = the dataset open in TopSpin
@@ -251,7 +258,7 @@ SETTINGS = [
 # D1_LIST, NS_LIST and OFF_NS_LIST; POWER is needed only with ON records
 BU_SERIES = ("on", "off", "interleaved", "on_then_off", "off_then_on")
 BU_SETTINGS = [
-    ("RUN_LABEL",        REQUIRED),   # short name in the run id; default: bu_<name> of buildup_<name>.py
+    ("RUN_LABEL",        REQUIRED),   # short name in the run id; default: bu_<name> of bu_<name>.py
     ("SAMPLE",           ""),
     ("MAS_INFO",         ""),
     ("DATA_DIR",         ""),         # "" (with DATA_NAME "") = the dataset open in TopSpin
@@ -485,7 +492,7 @@ def read_power_cal(path):
 
 def mono_slopes(xs, ys):
     """Slopes at the points for a monotone piecewise-cubic (Fritsch-Carlson, as PCHIP)
-    interpolation of increasing data; fs_plot.py uses the same."""
+    interpolation of increasing data; dnp_viewer.py uses the same."""
     n = len(xs)
     h = [xs[i + 1] - xs[i] for i in range(n - 1)]
     d = [(ys[i + 1] - ys[i]) / h[i] for i in range(n - 1)]
@@ -572,23 +579,48 @@ def html_text(x):
     return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def settings_files(prefix="settings_"):
-    """Names of the settings files that can be run (prefix: settings_ for fs, buildup_
-    for bu), without the template."""
+# The settings file prefix of each command is "<command>_"; fs and bu files had other
+# prefixes before November 2026, which are still found (with a note naming the new name).
+LEGACY_PREFIX = {"fs": "settings_", "bu": "buildup_"}
+SETTINGS_NOTES = []      # notes for the confirmation dialog, set by run_from_args
+
+
+def settings_prefixes(cmd):
+    """[new prefix] or [new prefix, old prefix] of the settings files of command cmd."""
+    return [cmd + "_"] + ([LEGACY_PREFIX[cmd]] if cmd in LEGACY_PREFIX else [])
+
+
+def settings_files(cmd="fs", folder=None):
+    """Names of the settings files of command cmd in folder (SETTINGS_DIR), templates left out."""
+    folder = folder or SETTINGS_DIR
     try:
-        names = os.listdir(SETTINGS_DIR)
+        names = os.listdir(folder)
     except CATCH:
         return []
-    return sorted([n for n in names if n.startswith(prefix) and n.endswith(".py")
-                   and n != prefix + "template.py"])
+    out = []
+    for n in names:
+        for p in settings_prefixes(cmd):
+            if n.startswith(p) and n.endswith(".py") and n != p + "template.py":
+                out.append(n)
+                break
+    return sorted(out)
 
 
-def choose_settings(cmd="fs", prefix="settings_"):
+def short_name(cmd, base):
+    """'p1' for fs_p1.py, settings_p1.py, bu_p1.py, buildup_p1.py, ..."""
+    stem = base[:-3] if base.endswith(".py") else base
+    for p in settings_prefixes(cmd):
+        if stem.startswith(p):
+            return stem[len(p):]
+    return stem
+
+
+def choose_settings(cmd="fs"):
     """Lets the user pick a settings file; returns its name or None."""
-    names = settings_files(prefix)
+    names = settings_files(cmd)
     if not names:
-        ERRMSG("%s: there are no settings files in %s.\nCopy %stemplate.py there to "
-               "%s<name>.py and fill it in." % (cmd, SETTINGS_DIR, prefix, prefix))
+        ERRMSG("%s: there are no settings files in %s.\nCopy %s_template.py there to "
+               "%s_<name>.py and fill it in." % (cmd, SETTINGS_DIR, cmd, cmd))
         return None
     from javax.swing import JOptionPane
     try:
@@ -605,65 +637,109 @@ def choose_settings(cmd="fs", prefix="settings_"):
     return str(choice)
 
 
-def settings_path(name, prefix="settings_"):
-    """Path of the settings file meant by name: a path, 'settings_bdpa(.py)' or 'bdpa'
-    (with prefix settings_; buildup_p1(.py) or p1 with prefix buildup_)."""
+def settings_candidates(name, cmd):
+    """File names that name ('p1', 'fs_p1', 'settings_p1', with or without .py) can mean,
+    new names first."""
+    stem = name[:-3] if name.endswith(".py") else name
+    short = short_name(cmd, stem)
+    out = []
+    for c in [stem + ".py"] + [p + short + ".py" for p in settings_prefixes(cmd)]:
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def settings_path(name, cmd="fs"):
+    """(path, error) of the settings file meant by name: a path, '<cmd>_p1(.py)', 'p1', or an
+    old name such as 'settings_p1'. Adds a note to SETTINGS_NOTES when an old name is used.
+    error is '' or why nothing may be run: the file is not found, it is only in the old
+    folder, or the old folder's copy was edited after it was copied to the new folder."""
     name = str(name).strip()
-    if os.sep in name or name.endswith(".py"):
-        p = name if os.path.isabs(name) else os.path.join(SETTINGS_DIR, name)
-        if not p.endswith(".py"):
-            p += ".py"
-        return p
-    for cand in (name + ".py", prefix + name + ".py"):
-        p = os.path.join(SETTINGS_DIR, cand)
-        if os.path.isfile(p):
-            return p
-    return os.path.join(SETTINGS_DIR, prefix + name + ".py")
+    if os.sep in name:
+        p = name if name.endswith(".py") else name + ".py"
+        return p, ("" if os.path.isfile(p) else "settings file %s not found" % p)
+    new_base = cmd + "_" + short_name(cmd, name) + ".py"
+    path = None
+    for cand in settings_candidates(name, cmd):
+        if os.path.isfile(os.path.join(SETTINGS_DIR, cand)):
+            path = os.path.join(SETTINGS_DIR, cand)
+            break
+    if path is None:
+        for cand in settings_candidates(name, cmd):
+            old = os.path.join(OLD_SETTINGS_DIR, cand)
+            if os.path.isfile(old):
+                return old, ("%s is only in the old folder %s, which is no longer used.\n"
+                             "Copy it to the new folder under its new name:\n"
+                             "    cp -p %s %s\nthen run '%s %s' again."
+                             % (cand, OLD_SETTINGS_DIR, old, os.path.join(SETTINGS_DIR, new_base),
+                                cmd, short_name(cmd, cand)))
+        avail = ", ".join([short_name(cmd, n) for n in settings_files(cmd)]) or "none"
+        return os.path.join(SETTINGS_DIR, new_base), ("settings file %s not found.\nAvailable in %s: %s"
+                                                      % (os.path.join(SETTINGS_DIR, new_base), SETTINGS_DIR, avail))
+    base = os.path.basename(path)
+    if base != new_base:
+        SETTINGS_NOTES.append("%s has an old name; rename it to %s (the run is not affected)."
+                              % (path, new_base))
+    elif name not in (short_name(cmd, name), new_base, new_base[:-3]):
+        SETTINGS_NOTES.append("'%s %s' is now '%s %s'." % (cmd, name, cmd, short_name(cmd, name)))
+    # A copy in the old folder that is newer than this file was probably edited by habit.
+    try:
+        mine = os.path.getmtime(path)
+        for cand in settings_candidates(base, cmd):
+            old = os.path.join(OLD_SETTINGS_DIR, cand)
+            if os.path.isfile(old) and os.path.getmtime(old) > mine + 1:
+                return path, ("%s in the old folder was changed after it was copied to\n%s.\n"
+                              "Only %s is used now. Make the change there (or copy the old file over it:\n"
+                              "    cp -p %s %s)\nand run '%s %s' again."
+                              % (old, path, SETTINGS_DIR, old, path, cmd, short_name(cmd, base)))
+    except CATCH:
+        pass
+    return path, ""
 
 
 def run_settings(args=None):
     """Entry point of fs.py. args: the words after 'fs' on TopSpin's command line."""
-    run_from_args(args, "fs", "settings_", "", run_profile)
+    run_from_args(args, "fs", run_profile)
 
 
 def run_buildup_settings(args=None):
     """Entry point of bu.py. args: the words after 'bu' on TopSpin's command line."""
-    run_from_args(args, "bu", "buildup_", "bu_", run_buildup)
+    run_from_args(args, "bu", run_buildup)
 
 
 def run_decay_settings(args=None):
     """Entry point of decay.py. args: the words after 'decay' on TopSpin's command line."""
-    run_from_args(args, "decay", "decay_", "decay_", run_decay)
+    run_from_args(args, "decay", run_decay)
 
 
 def run_powdep_settings(args=None):
     """Entry point of powdep.py. args: the words after 'powdep' on TopSpin's command line."""
-    run_from_args(args, "powdep", "powdep_", "powdep_", run_powdep)
+    run_from_args(args, "powdep", run_powdep)
 
 
 def run_chirp2d_settings(args=None):
     """Entry point of chirp2d.py. args: the words after 'chirp2d' on TopSpin's command line."""
-    run_from_args(args, "chirp2d", "chirp2d_", "chirp2d_", run_chirp2d)
+    run_from_args(args, "chirp2d", run_chirp2d)
 
 
-def run_from_args(args, cmd, prefix, label_prefix, runner):
+def run_from_args(args, cmd, runner):
     """Finds and reads the settings file named in args (or chosen from a list) and runs it
-    with runner; RUN_LABEL defaults to label_prefix + <name> of <prefix><name>.py."""
+    with runner. RUN_LABEL defaults to <name> of <cmd>_<name>.py; a RUN_LABEL that starts
+    with '<cmd>_' loses that prefix, since the type is in the run folder name anyway."""
+    del SETTINGS_NOTES[:]
     args = [str(a) for a in (args or []) if str(a).strip()]
-    name = args[0] if args else choose_settings(cmd, prefix)
+    name = args[0] if args else choose_settings(cmd)
     if not name:
         MSG("%s: no settings file chosen; nothing was started." % cmd)
         return
-    path = settings_path(name, prefix)
+    path, err = settings_path(name, cmd)
     base = os.path.basename(path)
-    template = prefix + "template.py"
-    if base == template:
+    if base in [p + "template.py" for p in settings_prefixes(cmd)]:
         ERRMSG("%s: %s is the template and is not run.\nCopy it to "
-               "%s/%s<name>.py, fill it in, and run '%s <name>'." % (cmd, template, SETTINGS_DIR, prefix, cmd))
+               "%s/%s_<name>.py, fill it in, and run '%s <name>'." % (cmd, base, SETTINGS_DIR, cmd, cmd))
         return
-    if not os.path.isfile(path):
-        avail = ", ".join([n[len(prefix):-3] for n in settings_files(prefix)]) or "none"
-        ERRMSG("%s: settings file %s not found.\nAvailable in %s: %s" % (cmd, path, SETTINGS_DIR, avail))
+    if err:
+        ERRMSG("%s: %s\nNothing was started." % (cmd, err))
         return
     ns = {"frange": frange, "logspace": logspace, "ns_for_time": ns_for_time}
     try:
@@ -672,9 +748,10 @@ def run_from_args(args, cmd, prefix, label_prefix, runner):
         ERRMSG("%s: error in the settings file %s:\n%s\nNothing was started." % (cmd, path, ex))
         return
     S = dict([(k, v) for k, v in ns.items() if k.isupper()])
-    if "RUN_LABEL" not in S:
-        stem = base[:-3]
-        S["RUN_LABEL"] = label_prefix + (stem[len(prefix):] if stem.startswith(prefix) else stem)
+    label = str(S.get("RUN_LABEL") or "").strip() or short_name(cmd, base)
+    if label.startswith(cmd + "_") and len(label) > len(cmd) + 1:
+        label = label[len(cmd) + 1:]
+    S["RUN_LABEL"] = label
     runner(S, path)
 
 
@@ -694,7 +771,7 @@ def check_settings(S, table, hint=""):
             lines.append("Missing setting(s): %s" % ", ".join(missing))
         if unknown and hint:
             lines.append(hint)
-        ERRMSG("fs_core.py: %s.\nNothing was started." % ".\n".join(lines))
+        ERRMSG("dnp_core.py: %s.\nNothing was started." % ".\n".join(lines))
         return None
     c = {}
     for n, d in table:
@@ -709,7 +786,7 @@ def check_settings(S, table, hint=""):
 
 def failer(label):
     def fail(msg):
-        ERRMSG("fs_core.py (%s): %s\nNothing was started." % (label, msg))
+        ERRMSG("dnp_core.py (%s): %s\nNothing was started." % (label, msg))
     return fail
 
 
@@ -842,7 +919,7 @@ def run_profile(S, source=None):
         return total_time, note
 
     def header(run_id, ds_root, peak_str, started):
-        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+        return ("# fs run file (read by dnp_viewer.py and fs_rephase.py)\n"
                 "# run_id = %s\n"
                 "# label = %s\n"
                 "# sample = %s\n"
@@ -861,7 +938,7 @@ def run_profile(S, source=None):
                    repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, POWER, D1, REPEATS, started))
 
     run_records(c, {
-        "noun": "frequency profile", "table": SETTINGS, "make_plan": make_plan,
+        "noun": "frequency profile", "kind": "fs", "table": SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"OFF_MODE": OFF_MODE, "FREQS": freqs},
         "settings_comments": lambda plan, record_time: [],
@@ -1140,7 +1217,7 @@ def run_buildup(S, source=None):
                        % (fmt_dur(times[k]), plan[k]["d1"], plan[k]["ns"]))
 
     def header(run_id, ds_root, peak_str, started):
-        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+        return ("# fs run file (read by dnp_viewer.py and fs_rephase.py)\n"
                 "# type = buildup\n"
                 "# run_id = %s\n"
                 "# label = %s\n"
@@ -1164,7 +1241,7 @@ def run_buildup(S, source=None):
                 ).replace("# columns:", freqs_header() + "# columns:", 1)
 
     def freqs_header():
-        """With FREQS: the frequency and power of each set, for fs_plot.py ('' without)."""
+        """With FREQS: the frequency and power of each set, for dnp_viewer.py ('' without)."""
         if not conds:
             return ""
         return ("# freq_order = %s\n# set_cw = %s\n"
@@ -1173,14 +1250,14 @@ def run_buildup(S, source=None):
                                           for k, q in enumerate(conds)])))
 
     def settings_comments(plan, record_time):
-        out = ["# planned records (expno, set, kind, D1 s, NS, expected s; read by fs_plot.py):"]
+        out = ["# planned records (expno, set, kind, D1 s, NS, expected s; read by dnp_viewer.py):"]
         for p in plan:
             out.append("# record: %d %d %s %s %d %d" % (p["expno"], p["set"], p["kind"], p["d1"], p["ns"],
                                                         int(round(record_time(p["ns"], p["d1"])))))
         return out
 
     run_records(c, {
-        "noun": "build-up", "table": BU_SETTINGS, "make_plan": make_plan,
+        "noun": "build-up", "kind": "bu", "table": BU_SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"SERIES": SERIES, "FREQ": FREQ, "POWER": POWER, "D1_LIST": d1s,
                  "NS_LIST": ns_on, "OFF_NS_LIST": ns_off if has_off else c["OFF_NS_LIST"],
@@ -1323,7 +1400,7 @@ def run_decay(S, source=None):
                        % (fmt_dur(POLARIZE_TIME), fmt_dur(targets[-1])))
 
     def header(run_id, ds_root, peak_str, started):
-        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+        return ("# fs run file (read by dnp_viewer.py and fs_rephase.py)\n"
                 "# type = decay\n"
                 "# run_id = %s\n"
                 "# label = %s\n"
@@ -1346,7 +1423,7 @@ def run_decay(S, source=None):
                    peak_str, repr(float(c["PEAK_WINDOW_PPM"])), INTENSITY_MODE, REPEATS, started))
 
     def settings_comments(plan, record_time):
-        out = ["# planned records (expno, set, kind, D1 or target s, NS, expected s; read by fs_plot.py):"]
+        out = ["# planned records (expno, set, kind, D1 or target s, NS, expected s; read by dnp_viewer.py):"]
         for p in plan:
             out.append("# record: %d %d %s %s %d %d" % (p["expno"], p["set"], p["kind"], p["d1"], 1,
                                                         int(round(expected(p)))))
@@ -1407,7 +1484,7 @@ def run_decay(S, source=None):
         return t_fin
 
     run_records(c, {
-        "noun": "decay", "table": DECAY_SETTINGS, "make_plan": make_plan,
+        "noun": "decay", "kind": "decay", "table": DECAY_SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"FREQ": FREQ, "POWER": POWER, "POLARIZE_TIME": POLARIZE_TIME, "TIMES_LIST": targets,
                  "FLIP_DEG": FLIP_DEG, "ZG_LATENCY": ZG_LATENCY, "MIN_D1": MIN_D1},
@@ -1586,7 +1663,7 @@ def run_powdep(S, source=None):
         return total_time, note
 
     def header(run_id, ds_root, peak_str, started):
-        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+        return ("# fs run file (read by dnp_viewer.py and fs_rephase.py)\n"
                 "# type = powdep\n"
                 "# run_id = %s\n"
                 "# label = %s\n"
@@ -1618,7 +1695,7 @@ def run_powdep(S, source=None):
         return ("\t%.3f" % rec["volt"]) if rec["kind"] == "ON" else "\t-"
 
     run_records(c, {
-        "noun": "power dependence", "table": POWDEP_SETTINGS, "make_plan": make_plan,
+        "noun": "power dependence", "kind": "powdep", "table": POWDEP_SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"OFF_MODE": OFF_MODE, "FREQ": FREQ, "VOLTAGES": volts,
                  "POWER_FRACTIONS": c["POWER_FRACTIONS"], "POWER_CAL": cal_path},
@@ -1816,7 +1893,7 @@ def run_chirp2d(S, source=None):
         return total_time, note
 
     def header(run_id, ds_root, peak_str, started):
-        return ("# fs run file (read by fs_plot.py and fs_rephase.py)\n"
+        return ("# fs run file (read by dnp_viewer.py and fs_rephase.py)\n"
                 "# type = chirp2d\n"
                 "# run_id = %s\n"
                 "# label = %s\n"
@@ -1853,7 +1930,7 @@ def run_chirp2d(S, source=None):
         return "\t%g\t%g" % (rec["width"], rec["ctime"])
 
     run_records(c, {
-        "noun": "chirp grid", "table": CHIRP2D_SETTINGS, "make_plan": make_plan,
+        "noun": "chirp grid", "kind": "chirp2d", "table": CHIRP2D_SETTINGS, "make_plan": make_plan,
         "dialog_rows": dialog_rows, "timing": timing, "header": header,
         "used": {"OFF_MODE": OFF_MODE, "FREQ": FREQ, "POWER": POWER, "CHIRP_SHAPE": SHAPE, "ORDER": ORDER,
                  "WIDTHS_MHZ": widths, "TIMES_US": times},
@@ -2208,12 +2285,17 @@ def run_records(c, job, source):
         "<b>Cancel</b> creates nothing.</span></p>"
         "</body></html>"
         % (fmt_dur(total_time), end_str, grey % time_note,
-           h(os.path.join(ds_root, RUNS_SUBDIR, "<start time>_%s_e%d" % (RUN_LABEL, START_EXPNO))),
+           h(os.path.join(ds_root, RUNS_SUBDIR, "%s_%s_<start time>_e%d" % (RUN_LABEL, job["kind"], START_EXPNO))),
            h(window_desc), h(INTENSITY_MODE), viewer_desc,
            grey % ("Timing: scan ~ D1 + %s s; poll every %s s; stop if a record runs %s s past its "
                    "expected end; %s s pad before each AWG change." % (SCAN_OVERHEAD, POLL_INTERVAL,
                                                                      MAX_EXTRA_WAIT, POST_ACQ_PAD)))
     )
+    if SETTINGS_NOTES:
+        summary = summary.replace(
+            "<p style='margin-top:10px'>",
+            "".join(["<p style='margin-top:6px;color:#a04000'>Note: %s</p>" % h(n) for n in SETTINGS_NOTES])
+            + "<p style='margin-top:10px'>", 1)
     if not confirm_dialog(summary, "Confirm '%s' run" % RUN_LABEL):
         MSG("%s: run cancelled by user before start." % RUN_LABEL)
         return
@@ -2224,7 +2306,7 @@ def run_records(c, job, source):
         return
 
     # ---- Run folder ------------------------------------------------------------
-    run_id  = "%s_%s_e%d" % (time.strftime("%Y%m%d-%H%M%S"), RUN_LABEL, START_EXPNO)
+    run_id  = "%s_%s_%s_e%d" % (RUN_LABEL, job["kind"], time.strftime("%Y%m%d-%H%M%S"), START_EXPNO)
     run_dir = os.path.join(ds_root, RUNS_SUBDIR, run_id)
     try:
         os.makedirs(run_dir)
@@ -2243,7 +2325,7 @@ def run_records(c, job, source):
     try:
         fh = open(os.path.join(run_dir, "settings.txt"), "w")
         try:
-            fh.write("# settings of run %s, as used (written by fs_core.py)\n" % run_id)
+            fh.write("# settings of run %s, as used (written by dnp_core.py)\n" % run_id)
             fh.write("# dataset: %s, %s\n" % (ds_root, ds_from))
             fh.write("# template: expno %d (%s), %s\n" % (TEMPLATE_EXPNO, tmpl_pulprog or "?", tmpl_from))
             fh.write("# expnos: %d..%d\n" % (START_EXPNO, planned_last))
@@ -2302,14 +2384,15 @@ def run_records(c, job, source):
         """One line in the common index. A failure is logged but does not stop the run."""
         user = os.environ.get("USER") or os.environ.get("LOGNAME") or "?"
         line = "\t".join([now_str(), event, clean(status), run_id, RUN_LABEL, clean(SAMPLE),
-                          ds_root, "%d-%d" % (START_EXPNO, planned_last), run_dir, user])
+                          ds_root, "%d-%d" % (START_EXPNO, planned_last), run_dir, user,
+                          job["kind"]])
         try:
             new = (not os.path.exists(INDEX_PATH)) or os.path.getsize(INDEX_PATH) == 0
             fh = open(INDEX_PATH, 'a')
             try:
                 if new:
                     fh.write("# time\tevent\tstatus\trun_id\tlabel\tsample\tdataset\texpnos"
-                             "\trun_folder\tuser\n")
+                             "\trun_folder\tuser\ttype\n")
                 fh.write(line + "\n")
             finally:
                 fh.close()
@@ -2426,7 +2509,7 @@ def run_records(c, job, source):
         return acquire(rec["expno"], rec["ns"], rec["d1"], rec["what"])
     # ---- Viewer -------------------------------------------------------------------
     def launch_viewer():
-        """Start fs_plot.py detached from TopSpin, with the Python variables of
+        """Start dnp_viewer.py detached from TopSpin, with the Python variables of
         TopSpin's Jython removed from its environment. Output goes to viewer.log.
         Returns True if the start command was issued, False otherwise."""
         def q(x):
@@ -2449,7 +2532,7 @@ def run_records(c, job, source):
         return "".join([("\\" + ch) if ch in special else ch for ch in s])
 
     # A viewer for this run is any process whose command line contains the file
-    # name of fs_plot.py followed by <run id>/run.txt; this also matches a viewer
+    # name of dnp_viewer.py followed by <run id>/run.txt; this also matches a viewer
     # opened by hand with an absolute path or a path relative to the dataset.
     viewer_pattern = (ere_escape(os.path.basename(VIEWER_PATH)) + ".*"
                       + ere_escape(run_id + "/run.txt"))

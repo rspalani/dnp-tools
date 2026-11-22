@@ -16,7 +16,7 @@
 # can point to an OFF record of an earlier run with the same RG and D1 for I_on/I_off - 1.
 # chirp2d_template.py explains every setting.
 
-#RUN_LABEL = "chirp2d_p1"
+#RUN_LABEL = "p1"
 
 SAMPLE   = "Diamond P1 center"
 MAS_INFO = "1.3 mm rotor, 100 K"

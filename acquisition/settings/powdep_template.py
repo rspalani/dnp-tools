@@ -2,7 +2,7 @@
 # against mm-wave power)
 #
 # To set up a new kind of power dependence, copy this file in the same folder:
-#     cp /opt/nmrdata/fs_settings/powdep_template.py /opt/nmrdata/fs_settings/powdep_<name>.py
+#     cp /opt/nmrdata/dnp_settings/powdep_template.py /opt/nmrdata/dnp_settings/powdep_<name>.py
 # fill in the values, and run it from TopSpin's command line with
 #     powdep <name>
 # ('powdep' alone lists the power-dependence settings files to choose from). This
@@ -31,15 +31,15 @@
 # The file is Python: plain assignments, with frange(start, stop, step) and
 # logspace(first, last, n) available. UPPERCASE names are settings; an UPPERCASE
 # name that is not a known setting stops the run before anything starts. Settings
-# left out take the defaults in /opt/dnptools/fs_core.py (POWDEP_SETTINGS).
+# left out take the defaults in /opt/dnptools/dnp_core.py (POWDEP_SETTINGS).
 #
 # Each run is recorded as a frequency profile is, in
-# <dataset>/fs_runs/<start time>_<RUN_LABEL>_e<START_EXPNO>/, and listed in
-# /opt/nmrdata/fs_runs.tsv.
+# <dataset>/dnp_runs/<RUN_LABEL>_<type>_<start time>_e<START_EXPNO>/, and listed in
+# /opt/nmrdata/dnp_runs.tsv.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# powdep_<name> from the file name powdep_<name>.py.
-#RUN_LABEL = "powdep_name"
+# <name> from the file name powdep_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "sample description"          # shown in the dialog, the titles and the plot
 MAS_INFO = "MAS rate, rotor, temperature"
@@ -93,7 +93,7 @@ MAX_CONSEC_SKIPS = 3   # ON points skipped in a row (failed 'cw') before the run
 # TopSpin commands run on each record once its acquisition has finished
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme", "max" or "sum"

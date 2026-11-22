@@ -17,35 +17,35 @@ record, and the viewer shows the enhancement as a map over width and time.
 Another TopSpin script applies the phase set in the viewer to the TopSpin data
 after a run.
 
-The headers of `fs_core.py`, `fs_plot.py`, and `fs_rephase_core.py` describe in
+The headers of `dnp_core.py`, `dnp_viewer.py`, and `dnp_rephase_core.py` describe in
 detail what each program does; this page covers installation and use.
 
 ## Files
 
 | In this folder | Installed as | What it is |
 |---|---|---|
-| `dnptools/fs_core.py` | `/opt/dnptools/fs_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, decays, power dependences, and chirp grids: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
-| `dnptools/fs_plot.py` | `/opt/dnptools/fs_plot.py` | Viewer (Python 3): profile, build-up, decay, power dependence, or chirp map with fits, one record at a time, phase/baseline/window, exports |
+| `dnptools/dnp_core.py` | `/opt/dnptools/dnp_core.py` | Acquisition code (TopSpin/Jython), for profiles, build-ups, decays, power dependences, and chirp grids: plan, checks, confirmation dialog, AWG commands, records, run folder, viewer |
+| `dnptools/dnp_viewer.py` | `/opt/dnptools/dnp_viewer.py` | Viewer (Python 3): profile, build-up, decay, power dependence, or chirp map with fits, one record at a time, phase/baseline/window, exports |
 | `dnptools/awg_power_cal.txt` | `/opt/dnptools/awg_power_cal.txt` | Output power of the 527 GHz source against the AWG drive voltage (for power dependences) |
-| `dnptools/fs_rephase_core.py` | `/opt/dnptools/fs_rephase_core.py` | Post-run phasing of the TopSpin data with the viewer's phase |
+| `dnptools/dnp_rephase_core.py` | `/opt/dnptools/dnp_rephase_core.py` | Post-run phasing of the TopSpin data with the viewer's phase |
 | `dnptools/awg_cmd.py` | `/opt/dnptools/awg_cmd.py` | Sends one command to the AWG control server (set its address; see below) |
 | `topspin/fs.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/fs.py` | TopSpin command `fs <name>` (profile) |
 | `topspin/bu.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/bu.py` | TopSpin command `bu <name>` (build-up) |
 | `topspin/decay.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/decay.py` | TopSpin command `decay <name>` (decay) |
 | `topspin/powdep.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/powdep.py` | TopSpin command `powdep <name>` (power dependence) |
 | `topspin/chirp2d.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/chirp2d.py` | TopSpin command `chirp2d <name>` (chirp grid) |
-| `topspin/fs_rephase.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/fs_rephase.py` | TopSpin command `fs_rephase` |
-| `settings/settings_template.py` | `/opt/nmrdata/fs_settings/` | Template for the settings files, one per kind of experiment |
-| `settings/settings_p1.py`, `settings_bdpa.py`, `settings_nox.py` | `/opt/nmrdata/fs_settings/` | Settings for the P1 diamond, BDPA, and m-TinyPol profiles |
-| `settings/buildup_template.py` | `/opt/nmrdata/fs_settings/` | Template for the build-up settings files |
-| `settings/buildup_p1.py`, `buildup_bdpa.py`, `buildup_nox.py` | `/opt/nmrdata/fs_settings/` | Build-up settings for the same samples (set `FREQ` before the first run) |
-| `settings/buildup_p1_freqs.py` | `/opt/nmrdata/fs_settings/` | Build-ups of the P1-diamond sample at four frequencies at 100 K (`FREQS`) |
-| `settings/decay_template.py` | `/opt/nmrdata/fs_settings/` | Template for the decay settings files |
-| `settings/decay_p1.py` | `/opt/nmrdata/fs_settings/` | Decay settings for the P1 diamond at 100 K (set `FREQ` before the first run) |
-| `settings/powdep_template.py` | `/opt/nmrdata/fs_settings/` | Template for the power-dependence settings files |
-| `settings/powdep_p1.py` | `/opt/nmrdata/fs_settings/` | Power-dependence settings for the P1 diamond (set `FREQ` and D1 before the first run) |
-| `settings/chirp2d_template.py` | `/opt/nmrdata/fs_settings/` | Template for the chirp-grid settings files |
-| `settings/chirp2d_p1.py` | `/opt/nmrdata/fs_settings/` | Chirp grid for the P1 diamond at 100 K: 526.008 GHz, 10 to 80 MHz x 1 to 8 µs, D1 3000 s (about 14.3 h) |
+| `topspin/fs_rephase.py`, `dnp_rephase.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/` | TopSpin command `fs_rephase` (also `dnp_rephase`) |
+| `settings/fs_template.py` | `/opt/nmrdata/dnp_settings/` | Template for the settings files, one per kind of experiment |
+| `settings/fs_p1.py`, `fs_bdpa.py`, `fs_nox.py` | `/opt/nmrdata/dnp_settings/` | Settings for the P1 diamond, BDPA, and m-TinyPol profiles |
+| `settings/bu_template.py` | `/opt/nmrdata/dnp_settings/` | Template for the build-up settings files |
+| `settings/bu_p1.py`, `bu_bdpa.py`, `bu_nox.py` | `/opt/nmrdata/dnp_settings/` | Build-up settings for the same samples (set `FREQ` before the first run) |
+| `settings/bu_p1_freqs.py` | `/opt/nmrdata/dnp_settings/` | Build-ups of the P1-diamond sample at four frequencies at 100 K (`FREQS`) |
+| `settings/decay_template.py` | `/opt/nmrdata/dnp_settings/` | Template for the decay settings files |
+| `settings/decay_p1.py` | `/opt/nmrdata/dnp_settings/` | Decay settings for the P1 diamond at 100 K (set `FREQ` before the first run) |
+| `settings/powdep_template.py` | `/opt/nmrdata/dnp_settings/` | Template for the power-dependence settings files |
+| `settings/powdep_p1.py` | `/opt/nmrdata/dnp_settings/` | Power-dependence settings for the P1 diamond (set `FREQ` and D1 before the first run) |
+| `settings/chirp2d_template.py` | `/opt/nmrdata/dnp_settings/` | Template for the chirp-grid settings files |
+| `settings/chirp2d_p1.py` | `/opt/nmrdata/dnp_settings/` | Chirp grid for the P1 diamond at 100 K: 526.008 GHz, 10 to 80 MHz x 1 to 8 µs, D1 3000 s (about 14.3 h) |
 
 The TopSpin scripts only start the code in `/opt/dnptools` (with `execfile`,
 so that TopSpin always runs the current version without being restarted).
@@ -76,13 +76,16 @@ index shows a run in progress (`--force` overrides). It then copies:
 
 | From the repository | To |
 |---|---|
-| `dnptools/fs_core.py`, `fs_plot.py`, `fs_rephase_core.py` | `/opt/dnptools/` |
+| `dnptools/dnp_core.py`, `dnp_viewer.py`, `dnp_rephase_core.py` | `/opt/dnptools/` |
 | `topspin/*.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/` |
 | `dnp_monitor.py`, `dnp_logviewer.py` (top folder) | `/opt/dnptools/dnp_monitor/` |
 | `dnptools/awg_cmd.py`, `awg_power_cal.txt` | `/opt/dnptools/`, only if not there yet |
-| `settings/*.py` | `/opt/nmrdata/fs_settings/`, only if not there yet |
+| `settings/*.py` | `/opt/nmrdata/dnp_settings/`, only if not there yet |
+| (on the spectrometer) `/opt/nmrdata/fs_settings/*.py` | `/opt/nmrdata/dnp_settings/` under the new names, only if not there yet |
 
-Every file it replaces is kept in `/opt/dnptools/backup/<date>/`. The site files,
+Every file it replaces is kept in `/opt/dnptools/backup/<date>/`, together with
+`restore.sh`, which puts those files back: `sudo bash /opt/dnptools/backup/<date>/restore.sh`
+undoes that update. The site files,
 `awg_cmd.py` with the AWG address, `awg_power_cal.txt`, and the settings files
 edited on the spectrometer, are never overwritten; to replace one with the
 repository's version, copy it by hand. On a new installation, set `HOST` (and
@@ -95,12 +98,48 @@ to the code that acquired it.
 A viewer that is already open keeps running the old code; close it and reopen
 it with the command shown in its window.
 
+### Names since November 2026
+
+Until November 2026 the names came from the first experiment type, the
+frequency sweep (fs). They are now the same for every type:
+
+| Before | Now |
+|---|---|
+| `/opt/nmrdata/fs_settings/` | `/opt/nmrdata/dnp_settings/` |
+| `settings_<name>.py` (profile), `buildup_<name>.py` (build-up) | `fs_<name>.py`, `bu_<name>.py`; `decay_`, `powdep_`, `chirp2d_` as before |
+| `<dataset>/fs_runs/<YYYYMMDD-HHMMSS>_<label>_e<expno>/` | `<dataset>/dnp_runs/<name>_<type>_<YYYYMMDD-HHMMSS>_e<expno>/` |
+| `/opt/nmrdata/fs_runs.tsv` | `/opt/nmrdata/dnp_runs.tsv` (same columns, plus `type` at the end) |
+| `/opt/dnptools/fs_core.py`, `fs_plot.py`, `fs_rephase_core.py` | `dnp_core.py`, `dnp_viewer.py`, `dnp_rephase_core.py` |
+| `frequency_profile/` in this repository | `acquisition/` |
+
+The TopSpin commands are typed as before (`fs p1`, `bu p1`, `decay p1`, ...).
+The first update with the new names copies every settings file of
+`fs_settings` into `dnp_settings` under its new name, unchanged and with its
+date, so values edited on the spectrometer carry over. After that only
+`dnp_settings` is read:
+
+- an old name still works (`bu buildup_p1`, or a file `buildup_x.py` in
+  `dnp_settings`); the confirmation dialog says what the new name is;
+- a settings file that is only in `fs_settings` is not run; the message gives
+  the `cp` command that copies it to `dnp_settings`;
+- if a file in `fs_settings` was changed after it was copied, nothing is run
+  and the message names both files, so an edit made in the old folder out of
+  habit is not silently ignored.
+
+`fs_settings`, `fs_runs.tsv`, the old run folders and the old programs in
+`/opt/dnptools` are left as they are: the viewer reads old and new run folders,
+and `restore.sh` of that update returns the TopSpin commands to the old
+programs. A `RUN_LABEL` set in a settings file loses a leading `<type>_`
+(`bu_p1` becomes `p1`), because the type is now in the folder name. Old run
+folders are renamed later, once the new names have been checked on the copy on
+fbml-rsp.
+
 ## Running a profile
 
 1. Make a settings file for the kind of experiment, or use an existing one:
 
    ```bash
-   cp /opt/nmrdata/fs_settings/settings_template.py /opt/nmrdata/fs_settings/settings_<name>.py
+   cp /opt/nmrdata/dnp_settings/fs_template.py /opt/nmrdata/dnp_settings/fs_<name>.py
    ```
 
    It is Python with plain assignments: `SAMPLE`, `MAS_INFO`, the dataset
@@ -118,12 +157,14 @@ it with the command shown in its window.
    after the next record.
 
 Each run gets a folder inside the dataset,
-`<dataset>/fs_runs/<YYYYMMDD-HHMMSS>_<label>_e<start expno>/`, with `run.txt`
+`<dataset>/dnp_runs/<name>_fs_<YYYYMMDD-HHMMSS>_e<start expno>/` (for example
+`p1_fs_20261122-210455_e300`), with `run.txt`
 (one line per finished record), `log.txt`, `settings.txt` (every setting as
 used), a copy of the settings file, and the viewer's files (`viewer.log`,
 `plot.png`, `values.tsv`, `phase.txt`, and `records.csv` and `profile.eps` when
 exported). The folder travels with the dataset when it is copied. One line per
-run start and end is added to `/opt/nmrdata/fs_runs.tsv`.
+run start and end is added to `/opt/nmrdata/dnp_runs.tsv`. `<name>` is the
+`<name>` of `fs_<name>.py`, or `RUN_LABEL` if the settings file sets it.
 
 ## Running a build-up
 
@@ -134,7 +175,7 @@ polarization and D1 is the build-up time.
 1. Make a build-up settings file, or use an existing one:
 
    ```bash
-   cp /opt/nmrdata/fs_settings/buildup_template.py /opt/nmrdata/fs_settings/buildup_<name>.py
+   cp /opt/nmrdata/dnp_settings/bu_template.py /opt/nmrdata/dnp_settings/bu_<name>.py
    ```
 
    It has the same dataset, template, timing, and live-plot settings as a
@@ -154,10 +195,10 @@ polarization and D1 is the build-up time.
      each, with more scans at short D1, rounded to a multiple of the phase
      cycle.
 
-   The examples: `buildup_p1.py` (room temperature, T_B expected at 6–7 min:
+   The examples: `bu_p1.py` (room temperature, T_B expected at 6–7 min:
    D1 15 to 2000 s, about 2 h; a comment gives values for 100 K),
-   `buildup_bdpa.py` (100 K, T_B about 30 s: D1 1 to 150 s, about 40 min), and
-   `buildup_nox.py` (100 K, T_B 6–7 s: D1 0.25 to 35 s, about 25 min), each
+   `bu_bdpa.py` (100 K, T_B about 30 s: D1 1 to 150 s, about 40 min), and
+   `bu_nox.py` (100 K, T_B 6–7 s: D1 0.25 to 35 s, about 25 min), each
    with `SERIES = "on"`.
 2. In TopSpin, type `bu <name>` (`bu` alone lists the build-up settings files).
    If `bu` runs something else on this TopSpin, the name is taken: rename
@@ -180,10 +221,10 @@ each set (`# set_cw`). The viewer fits each frequency separately and names the
 series by frequency; with "Error bars: repeats" the mean is over the repeats of
 the same frequency. Writing `D1_LIST` in a mixed order, rather than from short to
 long, keeps a drift from running along the D1 axis of every curve.
-`buildup_p1_freqs.py` is the example: the P1-diamond sample at 100 K, four
+`bu_p1_freqs.py` is the example: the P1-diamond sample at 100 K, four
 frequencies across the profile, D1 150 to 7200 s in a mixed order, about 13.8 h.
 
-The run folder is in `fs_runs` as for a profile, labelled `bu_<name>`; `run.txt`
+The run folder is in `dnp_runs` as for a profile, `<name>_bu_<time>_e<expno>`; `run.txt`
 has `# type = buildup` and the D1 of each record, and `settings.txt` lists every
 planned record with its expected duration (the viewer uses it for the expected
 end). A profile settings file given to `bu`, or a build-up file given to `fs`,
@@ -212,7 +253,7 @@ the template for the reference, the largest signal of the run.
 1. Make a decay settings file, or use `decay_p1.py`:
 
    ```bash
-   cp /opt/nmrdata/fs_settings/decay_template.py /opt/nmrdata/fs_settings/decay_<name>.py
+   cp /opt/nmrdata/dnp_settings/decay_template.py /opt/nmrdata/dnp_settings/decay_<name>.py
    ```
 
    It has the same dataset, template, and live-plot settings as a build-up,
@@ -245,7 +286,7 @@ and recorded with its actual time. Times are accurate to about a second, so
 decays of a minute or longer are followed well; faster decays need a pseudo-2D
 pulse program instead.
 
-The run folder is labelled `decay_<name>`; `run.txt` has `# type = decay`, the
+The run folder is `<name>_decay_<time>_e<expno>`; `run.txt` has `# type = decay`, the
 flip angle, and for each record its D1, its time t after the microwaves went
 off, and the target time. A decay file given to `fs` or `bu`, or another
 settings file given to `decay`, is refused with a message that says which
@@ -281,7 +322,7 @@ old runs.
 1. Make a settings file, or use `powdep_p1.py`:
 
    ```bash
-   cp /opt/nmrdata/fs_settings/powdep_template.py /opt/nmrdata/fs_settings/powdep_<name>.py
+   cp /opt/nmrdata/dnp_settings/powdep_template.py /opt/nmrdata/dnp_settings/powdep_<name>.py
    ```
 
    Besides the dataset, template, and live-plot settings of a profile it has
@@ -295,7 +336,7 @@ old runs.
 3. The confirmation dialog lists every point as drive voltage, fraction of full
    power, and mW at the calibration frequency, in acquisition order.
 
-The run folder is labelled `powdep_<name>`; `run.txt` has `# type = powdep`,
+The run folder is `<name>_powdep_<time>_e<expno>`; `run.txt` has `# type = powdep`,
 the calibration, and the drive voltage of each record in an eighth column.
 
 ## Running a chirp grid
@@ -318,7 +359,7 @@ or `OFF_MODE` to acquire one.
 1. Make a settings file, or use `chirp2d_p1.py`:
 
    ```bash
-   cp /opt/nmrdata/fs_settings/chirp2d_template.py /opt/nmrdata/fs_settings/chirp2d_<name>.py
+   cp /opt/nmrdata/dnp_settings/chirp2d_template.py /opt/nmrdata/dnp_settings/chirp2d_<name>.py
    ```
 
    Besides the dataset, template, and live-plot settings of a profile it has
@@ -341,7 +382,7 @@ three each on 5 and 20 MHz/µs, two on 2.5 and 40, and one on 1.25 and 80; with
 the CW record that is 17 records of about 50 min, about 14.3 h. Check `FREQ`,
 the dataset, `START_EXPNO`, and the template before the run.
 
-The run folder is labelled `chirp2d_<name>`; `run.txt` has `# type = chirp2d`,
+The run folder is `<name>_chirp2d_<time>_e<expno>`; `run.txt` has `# type = chirp2d`,
 the grid, the chirps in acquisition order (`# chirps`), and the chirp width
 (MHz) and time (µs) of each record in two more columns (width 0 for the CW
 record).
@@ -371,7 +412,7 @@ another D1 or receiver gain does not give the enhancement. `run.txt` has
 It opens by itself during a run; to open it later, for any run:
 
 ```bash
-python3 /opt/dnptools/fs_plot.py <dataset>/fs_runs/<run folder>/run.txt
+python3 /opt/dnptools/dnp_viewer.py <dataset>/dnp_runs/<run folder>/run.txt
 ```
 
 (the exact command is shown in the window and in `viewer.log`). With `--once`,
