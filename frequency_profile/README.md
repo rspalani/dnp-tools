@@ -61,36 +61,36 @@ so that TopSpin always runs the current version without being restarted).
 
 ## Installation and updates
 
-From the clone of this repository in `/home/nmrsu/src/dnp-tools` (see the main
-README):
+Updates are installed with one command, as nmrsu on the spectrometer PC (it asks
+for the sudo password to write in `/opt`):
 
 ```bash
-cd /home/nmrsu/src/dnp-tools && git pull
-cd frequency_profile
-
-# programs (-n: an existing awg_cmd.py, with the real address, is kept)
-sudo mkdir -p /opt/dnptools
-sudo cp dnptools/fs_core.py dnptools/fs_plot.py dnptools/fs_rephase_core.py /opt/dnptools/
-sudo cp -n dnptools/awg_cmd.py dnptools/awg_power_cal.txt /opt/dnptools/
-sudo chmod a+r /opt/dnptools/*.py /opt/dnptools/awg_power_cal.txt
-
-# TopSpin commands
-U=/opt/topspin3.6.2/exp/stan/nmr/py/user
-sudo cp topspin/fs.py topspin/bu.py topspin/decay.py topspin/powdep.py topspin/chirp2d.py topspin/fs_rephase.py $U/
-sudo chmod a+r $U/fs.py $U/bu.py $U/decay.py $U/powdep.py $U/chirp2d.py $U/fs_rephase.py
-
-# settings (-n: settings files already on the spectrometer are kept)
-sudo mkdir -p /opt/nmrdata/fs_settings
-sudo cp -n settings/*.py /opt/nmrdata/fs_settings/
-sudo chown -R nmrsu /opt/nmrdata/fs_settings      # editable by the TopSpin user
+bash /home/nmrsu/src/dnp-tools/deploy/update.sh --dry-run   # what would change
+bash /home/nmrsu/src/dnp-tools/deploy/update.sh             # update to the latest main
 ```
 
-On a new installation, set `HOST` (and `PORT`) in `/opt/dnptools/awg_cmd.py` to
-the AWG control server's address: the repository keeps a placeholder, as it does
-for the monitor's instrument addresses. `awg_power_cal.txt` is copied with `-n`
-too, so a calibration measured on the spectrometer is kept; copy it without `-n`
-to replace it with the repository's version. The settings files are edited on the
-spectrometer; to replace one with the repository's version, copy it without `-n`.
+[`deploy/update.sh`](../deploy/update.sh) pulls the latest `main` into the clone in
+`/home/nmrsu/src/dnp-tools` (the first time, it makes the clone; a folder there that
+is not a git clone, such as an unpacked tarball, is moved aside), and stops if the run
+index shows a run in progress (`--force` overrides). It then copies:
+
+| From the repository | To |
+|---|---|
+| `dnptools/fs_core.py`, `fs_plot.py`, `fs_rephase_core.py` | `/opt/dnptools/` |
+| `topspin/*.py` | `/opt/topspin3.6.2/exp/stan/nmr/py/user/` |
+| `dnp_monitor.py`, `dnp_logviewer.py` (top folder) | `/opt/dnptools/dnp_monitor/` |
+| `dnptools/awg_cmd.py`, `awg_power_cal.txt` | `/opt/dnptools/`, only if not there yet |
+| `settings/*.py` | `/opt/nmrdata/fs_settings/`, only if not there yet |
+
+Every file it replaces is kept in `/opt/dnptools/backup/<date>/`. The site files,
+`awg_cmd.py` with the AWG address, `awg_power_cal.txt`, and the settings files
+edited on the spectrometer, are never overwritten; to replace one with the
+repository's version, copy it by hand. On a new installation, set `HOST` (and
+`PORT`) in `/opt/dnptools/awg_cmd.py` to the AWG control server's address.
+
+The script writes the installed commit to `/opt/dnptools/VERSION`, and every run
+copies that line into its `run.txt` as `# code_version`, so each run can be traced
+to the code that acquired it.
 
 A viewer that is already open keeps running the old code; close it and reopen
 it with the command shown in its window.

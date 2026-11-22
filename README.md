@@ -91,16 +91,14 @@ logs in needs the file on its own desktop; `sudo cp launch/dnp_monitor.desktop
 **Updating**
 
 ```bash
-cd /home/nmrsu/src/dnp-tools && git pull
-# close the monitor (its window), then:
-sudo cp dnp_monitor.py dnp_logviewer.py /opt/dnptools/dnp_monitor/
-dnp_monitor
+bash /home/nmrsu/src/dnp-tools/deploy/update.sh
 ```
 
-Copy the files out of the clone; do not move them. git counts a moved file as a
-local deletion, and the next `git pull` stops when that file has changed on GitHub.
-The frequency-profile tools are installed and updated from the same clone; see
-[frequency_profile/README.md](frequency_profile/README.md).
+installs the latest `main` of everything in this repository: the monitor, the
+viewer, and the acquisition scripts (see
+[frequency_profile/README.md](frequency_profile/README.md#installation-and-updates)).
+If it reports that the monitor changed, close the monitor (its window) and start it
+again with `dnp_monitor`.
 
 ### Configuration
 
