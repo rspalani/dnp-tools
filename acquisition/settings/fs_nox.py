@@ -1,8 +1,8 @@
-# settings_nox.py  -  settings for fs.py: DNP frequency profiles of a nitroxide sample
+# fs_nox.py  -  settings for fs.py: DNP frequency profiles of a nitroxide sample
 #
 # Run in TopSpin with:   fs nox
 # Check the dataset, START_EXPNO and the template expno before each run; the
-# confirmation dialog shows them in large type. settings_template.py explains
+# confirmation dialog shows them in large type. fs_template.py explains
 # every setting. UPPERCASE names are settings, lowercase names are helpers.
 
 SAMPLE   = "m-tinypol"
@@ -50,7 +50,7 @@ OFF_SCANS  = 4
 
 AWG_SETTLE = 2         # s after each AWG command, before the record is set up
 
-# Record timing (see settings_template.py)
+# Record timing (see fs_template.py)
 SCAN_OVERHEAD  = 5     # s per scan beyond D1 (saturation block, pulses, acquisition);
                        # sets the expected duration used for the estimate and the deadline
 POLL_INTERVAL  = 2     # s between completion checks
@@ -66,12 +66,12 @@ MAX_CONSEC_SKIPS = 3   # ON points skipped in a row (failed 'cw') before the run
 # before the next AWG command. Set to [] for no processing.
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = None       # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 10.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme": largest |value| in the window, sign kept
                              # "max"    : largest value (for magnitude spectra, 'mc')
                              # "sum"    : sum of the points in the window
-LAUNCH_VIEWER   = True       # start fs_plot.py in the background when the run starts
+LAUNCH_VIEWER   = True       # start dnp_viewer.py in the background when the run starts
 RESPAWN_VIEWER  = True       # after each record, start it again if no viewer for this
                              # run is running (e.g. its window was closed)

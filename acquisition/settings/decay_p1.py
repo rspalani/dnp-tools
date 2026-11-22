@@ -11,8 +11,8 @@
 # overflow message). About 5.5 h in all. decay_template.py explains every setting.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# decay_<name> from the file name decay_<name>.py.
-#RUN_LABEL = "decay_name"
+# <name> from the file name decay_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "Diamond P1 center"
 MAS_INFO = "13 kHz MAS, 1.3 mm Zirconia rotor, 100 K"
@@ -58,7 +58,7 @@ AWG_RETRIES    = 3     # attempts per AWG command, 5 s apart
 # TopSpin commands run on each record once its acquisition has finished
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 26.0       # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 10.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme", "max" or "sum" (for weak signals: "sum")

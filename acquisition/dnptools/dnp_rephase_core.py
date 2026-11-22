@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-fs_rephase_core.py  -  code of fs_rephase.py: apply the phase correction set
-in fs_plot.py to the TopSpin data of one run (TopSpin / Jython)
+dnp_rephase_core.py  -  code of fs_rephase.py: apply the phase correction set
+in dnp_viewer.py to the TopSpin data of one run (TopSpin / Jython)
 
 Not run directly: the TopSpin script fs_rephase.py (in TopSpin's py/user
 folder) runs
-    execfile("/opt/dnptools/fs_rephase_core.py")
+    execfile("/opt/dnptools/dnp_rephase_core.py")
     run_rephase(RUN_FILE)
 
-fs_plot.py corrects the phase only in the viewer; TopSpin's spectra are not
+dnp_viewer.py corrects the phase only in the viewer; TopSpin's spectra are not
 changed. This script reprocesses the records of one run with that phase.
 Run it only when no acquisition script is running: it changes TopSpin's
 current dataset with 're', which would disturb a running script.
 
-Input: the run file <dataset>/fs_runs/<run id>/run.txt (RUN_FILE in
+Input: the run file <dataset>/dnp_runs/<run id>/run.txt (RUN_FILE in
 fs_rephase.py, or chosen in a file dialog) and phase.txt next to it, which
-fs_plot.py writes when 'Apply to all records' is pressed (for a run file of the
+dnp_viewer.py writes when 'Apply to all records' is pressed (for a run file of the
 earlier scripts, <run file without .txt>_phase.txt). The phase there is a correction on top of
 the phase the records were processed with (PHC0 = base_phc0, PHC1 =
 base_phc1); records processed with other values are skipped. The viewer's
 baseline correction is not transferred; PROCESS_CMDS (default efp, absn) are
 run as in the acquisition scripts.
 
-fs_plot.py and TopSpin need not define the phase with the same sign or the
+dnp_viewer.py and TopSpin need not define the phase with the same sign or the
 same reference point for the first-order term, so the script measures
 TopSpin's convention on the first matching record instead of assuming it:
   1. It runs efp on that record with its original PHC0/PHC1, with PHC0 +
@@ -37,20 +37,20 @@ TopSpin's convention on the first matching record instead of assuming it:
   3. After a second confirmation it sets PHC0/PHC1 and runs PROCESS_CMDS on
      every matching record, checking procs afterwards.
   4. When all records are done, it rewrites the phase file with the new values
-     as the base and a zero correction, so that fs_plot.py shows the
+     as the base and a zero correction, so that dnp_viewer.py shows the
      reprocessed spectra as they are.
 If the calibration or the check fails, or the second dialog is cancelled, the
 first record is processed again with its original PHC0/PHC1 and PROCESS_CMDS,
 and nothing else is changed. If processing fails part way, the records done so
-far keep the new phase and the phase file is left unchanged; fs_plot.py then
+far keep the new phase and the phase file is left unchanged; dnp_viewer.py then
 shows those records as processed and corrects only the others, and running
 this script again continues with the others.
 
-The expnos are looked for in the dataset that contains the fs_runs folder, so
-a dataset moved or copied with its fs_runs folder is processed where it is now.
+The expnos are looked for in the dataset that contains the dnp_runs folder, so
+a dataset moved or copied with its dnp_runs folder is processed where it is now.
 Every step is time-stamped in rephase.log in the run folder (for an older run
 file, in <dataset>/fs_rephase_log.txt), and one line is appended to the common
-index /opt/nmrdata/fs_runs.tsv when the TopSpin data have been changed.
+index /opt/nmrdata/dnp_runs.tsv when the TopSpin data have been changed.
 """
 import os
 import re
@@ -169,7 +169,7 @@ def write_phase(path, ph, comment):
     text = (
         "# phase settings, written by fs_rephase.py at %s\n"
         "# %s\n"
-        "# fs_plot.py multiplies 1r + i*1i of every record processed with PHC0 = base_phc0\n"
+        "# dnp_viewer.py multiplies 1r + i*1i of every record processed with PHC0 = base_phc0\n"
         "# and PHC1 = base_phc1 by exp(i*phi), phi = ph0 + ph1*(k/SI - u_pivot) (deg),\n"
         "# k = 0 at OFFSET, u_pivot = (OFFSET - pivot_ppm)*SF/SW_p, and with baseline = 1\n"
         "# subtracts a polynomial of order baseline_order.\n"
@@ -187,7 +187,7 @@ def write_phase(path, ph, comment):
         fh.close()
 
 
-INDEX_PATH = "/opt/nmrdata/fs_runs.tsv"
+INDEX_PATH = "/opt/nmrdata/dnp_runs.tsv"
 RUN_FILE_NAME = "run.txt"
 
 
@@ -214,7 +214,7 @@ def index_line(fields):
         try:
             if new:
                 fh.write("# time\tevent\tstatus\trun_id\tlabel\tsample\tdataset\texpnos"
-                         "\trun_folder\tuser\n")
+                         "\trun_folder\tuser\ttype\n")
             fh.write("\t".join([str(f).replace("\t", " ").replace("\n", " ") for f in fields]) + "\n")
         finally:
             fh.close()
@@ -227,7 +227,7 @@ def choose_file(start_dir):
     from javax.swing import JFileChooser
     from javax.swing.filechooser import FileNameExtensionFilter
     fc = JFileChooser(start_dir)
-    fc.setDialogTitle("fs_rephase.py: choose the run file (fs_runs/<run id>/run.txt)")
+    fc.setDialogTitle("fs_rephase.py: choose the run file (dnp_runs/<run id>/run.txt)")
     fc.setFileFilter(FileNameExtensionFilter("run files (run.txt)", "txt"))
     if fc.showOpenDialog(None) == JFileChooser.APPROVE_OPTION:
         return str(fc.getSelectedFile().getAbsolutePath())
@@ -265,7 +265,7 @@ def run_rephase(RUN_FILE=""):
         ERRMSG("fs_rephase.py: the dataset of %s was not found." % run_path)
         return
     if not os.path.isfile(phase_path):
-        ERRMSG("fs_rephase.py: no phase file %s.\nSet the phase in fs_plot.py and press "
+        ERRMSG("fs_rephase.py: no phase file %s.\nSet the phase in dnp_viewer.py and press "
                "'Apply to all records' first." % phase_path)
         return
     for c in PROCESS_CMDS:
@@ -459,7 +459,7 @@ def run_rephase(RUN_FILE=""):
         "About to apply the viewer's phase to the TopSpin data (fs_rephase.py)\n\n"
         "Run file     : %s\n"
         "Dataset      : %s / %s\n"
-        "Phase        : PH0 %+.2f, PH1 %+.2f deg, pivot %.3f ppm (fs_plot.py),\n"
+        "Phase        : PH0 %+.2f, PH1 %+.2f deg, pivot %.3f ppm (dnp_viewer.py),\n"
         "               on top of PHC0 = %s, PHC1 = %s\n"
         "Records      : %d (expno %d..%d)\n"
         "%s"
@@ -569,7 +569,7 @@ def run_rephase(RUN_FILE=""):
         rest = [e for e in todo if e not in done]
         log("STOPPED at expno %d: %s" % (rest[0], ex))
         ERRMSG("fs_rephase.py STOPPED at expno %d: %s.\n\n%d record(s) were reprocessed with PHC0 = %s, "
-               "PHC1 = %s; %d were not. The phase file was not changed, so fs_plot.py corrects only "
+               "PHC1 = %s; %d were not. The phase file was not changed, so dnp_viewer.py corrects only "
                "the records not yet reprocessed. Running fs_rephase.py again continues with them.\n"
                "Log: %s" % (rest[0], ex, len(done), fmt_num(new0), fmt_num(new1), len(rest), LOG_PATH))
         return
@@ -582,9 +582,9 @@ def run_rephase(RUN_FILE=""):
                                                    ph["ph0"], ph["ph1"], ph["pivot"]))
     try:
         write_phase(phase_path, new_ph, comment)
-        pf = "Phase file updated: fs_plot.py now shows these records as processed."
+        pf = "Phase file updated: dnp_viewer.py now shows these records as processed."
     except CATCH as ex:
-        pf = ("The phase file could NOT be updated (%s). fs_plot.py still shows the reprocessed "
+        pf = ("The phase file could NOT be updated (%s). dnp_viewer.py still shows the reprocessed "
               "records correctly, because their PHC0/PHC1 no longer match the file, but it keeps "
               "listing the old correction; set PH0 = PH1 = 0 there and press 'Apply to all records'."
               % ex)
@@ -593,7 +593,8 @@ def run_rephase(RUN_FILE=""):
     run_id = meta.get("run_id") or os.path.basename(run_path)
     err = index_line([time.strftime("%Y-%m-%d %H:%M:%S"), "rephase", comment, run_id,
                       meta.get("label", ""), meta.get("sample", ""), ds_root,
-                      "%d-%d" % (todo[0], todo[-1]), os.path.dirname(os.path.abspath(run_path)), user])
+                      "%d-%d" % (todo[0], todo[-1]), os.path.dirname(os.path.abspath(run_path)), user,
+                      {"buildup": "bu", "": "fs"}.get(meta.get("type", ""), meta.get("type", ""))])
     if err:
         log("Could not write to the run index %s [%s]" % (INDEX_PATH, err))
     MSG("fs_rephase.py: %d record(s) reprocessed with PHC0 = %s, PHC1 = %s (%s).\n%s%s\nLog: %s"

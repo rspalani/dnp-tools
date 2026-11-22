@@ -1,7 +1,7 @@
 # decay_template.py  -  template for the settings files of decay.py (DNP decay)
 #
 # To set up a new kind of decay, copy this file in the same folder:
-#     cp /opt/nmrdata/fs_settings/decay_template.py /opt/nmrdata/fs_settings/decay_<name>.py
+#     cp /opt/nmrdata/dnp_settings/decay_template.py /opt/nmrdata/dnp_settings/decay_<name>.py
 # fill in the values, and run it from TopSpin's command line with
 #     decay <name>
 # ('decay' alone lists the decay settings files to choose from). This template itself
@@ -30,16 +30,16 @@
 # The file is Python: plain assignments, with logspace(first, last, n) and
 # frange(start, stop, step) available. UPPERCASE names are settings; an UPPERCASE
 # name that is not a known setting stops the run before anything starts. Settings
-# left out take the defaults in /opt/dnptools/fs_core.py (DECAY_SETTINGS).
+# left out take the defaults in /opt/dnptools/dnp_core.py (DECAY_SETTINGS).
 #
 # Each run is recorded as a frequency profile is, in
-# <dataset>/fs_runs/<start time>_<RUN_LABEL>_e<START_EXPNO>/, and listed in
-# /opt/nmrdata/fs_runs.tsv; the viewer plots the intensity against the time after
+# <dataset>/dnp_runs/<RUN_LABEL>_<type>_<start time>_e<START_EXPNO>/, and listed in
+# /opt/nmrdata/dnp_runs.tsv; the viewer plots the intensity against the time after
 # the microwaves went off and fits the decay.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# decay_<name> from the file name decay_<name>.py.
-#RUN_LABEL = "decay_name"
+# <name> from the file name decay_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "sample description"          # shown in the dialog, the titles and the plot
 MAS_INFO = "MAS rate, rotor, temperature"
@@ -83,7 +83,7 @@ AWG_RETRIES    = 3     # attempts per AWG command, 5 s apart
 # TopSpin commands run on each record once its acquisition has finished
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme", "max" or "sum" (for weak signals: "sum")

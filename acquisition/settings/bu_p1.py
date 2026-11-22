@@ -1,36 +1,17 @@
-# buildup_template.py  -  template for the settings files of bu.py (DNP build-up)
+# bu_p1.py  -  settings for bu.py: DNP build-up of a P1-diamond powder sample, at room temperature
 #
-# To set up a new kind of build-up, copy this file in the same folder:
-#     cp /opt/nmrdata/fs_settings/buildup_template.py /opt/nmrdata/fs_settings/buildup_<name>.py
-# fill in the values, and run it from TopSpin's command line with
-#     bu <name>
-# ('bu' alone lists the build-up settings files to choose from). This template
-# itself is not run.
-#
-# A build-up run acquires one record per build-up time D1, at one mm-wave
-# frequency or with the microwaves off. The template's pulse program must
-# saturate before D1, so that every scan starts from zero polarization and D1
-# is the build-up time.
-#
-# The file is Python: plain assignments, with logspace(first, last, n),
-# ns_for_time(...) and frange(start, stop, step) available. UPPERCASE names are
-# settings; an UPPERCASE name that is not a known setting stops the run before
-# anything starts, so typos are caught. Use lowercase names for your own helper
-# variables. Settings left out take the defaults listed in
-# /opt/dnptools/fs_core.py (BU_SETTINGS).
-#
-# Each run is recorded as a frequency profile is, in
-# <dataset>/fs_runs/<start time>_<RUN_LABEL>_e<START_EXPNO>/ (run.txt, log.txt,
-# a copy of this file, settings.txt with every value as used, and the viewer's
-# files), and listed in /opt/nmrdata/fs_runs.tsv. The viewer plots the
-# intensity against D1 and fits the build-up.
+# Run in TopSpin with:   bu p1
+# Set FREQ (below) to the frequency to irradiate at, and check the dataset,
+# START_EXPNO and the template expno before each run; the confirmation dialog
+# shows them in large type. The template's pulse program must saturate before
+# D1. bu_template.py explains every setting.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# bu_<name> from the file name buildup_<name>.py.
-#RUN_LABEL = "bu_name"
+# <name> from the file name bu_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
-SAMPLE   = "sample description"          # shown in the dialog, the titles and the plot
-MAS_INFO = "MAS rate, rotor, temperature"
+SAMPLE   = "Diamond P1 center"
+MAS_INFO = "15 kHz MAS, 1.3 mm diamond(c-3-1) rotor, RT"
 
 # Dataset and template expno. Values set here are used; leave DATA_DIR and
 # DATA_NAME both "" to use the dataset open in TopSpin when the script starts,
@@ -59,30 +40,18 @@ SERIES = "on"
 FREQ  = None                 # GHz, e.g. the frequency of the largest enhancement in the profile
 POWER = 0.4                  # second argument of the AWG 'cw' command
 
-# Several frequencies in one run (SERIES "on" only): set FREQS instead of FREQ, one
-# build-up per entry. An entry is a frequency in GHz, which gets POWER, or a
-# (frequency, power) pair. FREQ_ORDER "by_d1" acquires, at each D1, one record at every
-# frequency in turn (a drift then affects every frequency alike); "by_freq" the whole
-# build-up of one frequency, then the next. Each frequency is its own set in run.txt and
-# in the viewer. buildup_p1_freqs.py is an example.
-#FREQS      = [526.008, 525.985, (526.008, 0.147)]
-#FREQ_ORDER = "by_d1"
-
 SCAN_OVERHEAD = 5            # s per scan beyond D1 (saturation block, pulses, acquisition);
                              # used for the time estimate, the deadline, and ns_for_time below
 
-# Build-up times D1 (s), acquired in the order written. logspace(first, last, n)
-# gives n values evenly spaced on a log scale (rounded to 3 significant digits);
-# a list can also be written out, e.g. [1, 2, 4, 8, 16, 32, 64, 128].
-# About 0.05 to 5 times the expected T_B covers the curve and its plateau.
-D1_LIST = logspace(1, 150, 12)
+# Build-up times D1 (s), in the order written. T_B is expected at 6-7 min at room
+# temperature, so 15 s to 2000 s (about 0.04 to 5 T_B). At 100 K, where T_B is
+# expected at 30-40 min, use e.g. logspace(100, 10000, 10) with
+# ns_for_time(D1_LIST, 1200, ns_max=8, overhead=SCAN_OVERHEAD): about 7.7 h.
+D1_LIST = logspace(15, 2000, 10)
 
-# Scans per ON record: one number for all records, or a list with one per D1.
-# ns_for_time(D1_LIST, seconds, ns_min, ns_max, multiple, overhead) gives records
-# of about `seconds` each: NS = seconds / (D1 + overhead), at most ns_max, rounded
-# down to a multiple of `multiple` (the phase cycle), and at least ns_min (by
-# default `multiple`). That is, more scans at short D1, where the signal is small.
-NS_LIST     = ns_for_time(D1_LIST, 120, ns_max=32, multiple=4, overhead=SCAN_OVERHEAD)
+# Scans: records of about 10 min, at most 16 scans and at least 1 (NS 16, 16, 12,
+# 7, 4, 2, 1, 1, 1, 1); about 2 h in all with SERIES "on".
+NS_LIST     = ns_for_time(D1_LIST, 600, ns_max=16, overhead=SCAN_OVERHEAD)
 OFF_NS_LIST = None           # scans per OFF record, in the same way; None = NS_LIST
 DS          = 0              # dummy scans, set on every record (with saturation, 0 is enough)
 
@@ -105,12 +74,12 @@ MAX_CONSEC_SKIPS = 3   # ON records skipped in a row (failed 'cw') before the ru
 # before the next AWG command. Set to [] for no processing.
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
-PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
-PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
+PEAK_PPM        = 26.0       # centre of the intensity window (ppm); None = whole spectrum
+PEAK_WINDOW_PPM = 10.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme": largest |value| in the window, sign kept
                              # "max"    : largest value (for magnitude spectra, 'mc')
                              # "sum"    : sum of the points in the window
-LAUNCH_VIEWER   = True       # start fs_plot.py in the background when the run starts
+LAUNCH_VIEWER   = True       # start dnp_viewer.py in the background when the run starts
 RESPAWN_VIEWER  = True       # after each record, start it again if no viewer for this
                              # run is running (e.g. its window was closed)

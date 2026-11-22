@@ -2,7 +2,7 @@
 # over a grid of chirp widths and chirp times)
 #
 # To set up a new kind of chirp grid, copy this file in the same folder:
-#     cp /opt/nmrdata/fs_settings/chirp2d_template.py /opt/nmrdata/fs_settings/chirp2d_<name>.py
+#     cp /opt/nmrdata/dnp_settings/chirp2d_template.py /opt/nmrdata/dnp_settings/chirp2d_<name>.py
 # fill in the values, and run it from TopSpin's command line with
 #     chirp2d <name>
 # ('chirp2d' alone lists the chirp-grid settings files to choose from). This template
@@ -28,11 +28,11 @@
 # The file is Python: plain assignments, with frange(start, stop, step) and
 # logspace(first, last, n) available. UPPERCASE names are settings; an UPPERCASE
 # name that is not a known setting stops the run before anything starts. Settings
-# left out take the defaults in /opt/dnptools/fs_core.py (CHIRP2D_SETTINGS).
+# left out take the defaults in /opt/dnptools/dnp_core.py (CHIRP2D_SETTINGS).
 
 # Short name used in the run folder name and the index. Leave it out to use
-# chirp2d_<name> from the file name chirp2d_<name>.py.
-#RUN_LABEL = "chirp2d_name"
+# <name> from the file name chirp2d_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "sample description"          # shown in the dialog, the titles and the plot
 MAS_INFO = "MAS rate, rotor, temperature"
@@ -84,7 +84,7 @@ MAX_CONSEC_SKIPS = 3   # ON records skipped in a row (failed AWG command) before
 # TopSpin commands run on each record once its acquisition has finished
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme", "max" or "sum"

@@ -1,14 +1,14 @@
-# buildup_bdpa.py  -  settings for bu.py: DNP build-up of BDPA in oTP at 100 K
+# bu_bdpa.py  -  settings for bu.py: DNP build-up of BDPA in oTP at 100 K
 #
 # Run in TopSpin with:   bu bdpa
 # Set FREQ (below) to the frequency to irradiate at, and check the dataset,
 # START_EXPNO and the template expno before each run; the confirmation dialog
 # shows them in large type. The template's pulse program must saturate before
-# D1. buildup_template.py explains every setting.
+# D1. bu_template.py explains every setting.
 
 # Short name used in the run folder name and the index. Leave it out to use
-# bu_<name> from the file name buildup_<name>.py.
-#RUN_LABEL = "bu_name"
+# <name> from the file name bu_<name>.py (the type is added to the folder name).
+#RUN_LABEL = "name"
 
 SAMPLE   = "BDPA in oTP"
 MAS_INFO = "13 kHz, 1.3 mm diamond rotor, 100 K"
@@ -72,12 +72,12 @@ MAX_CONSEC_SKIPS = 3   # ON records skipped in a row (failed 'cw') before the ru
 # before the next AWG command. Set to [] for no processing.
 PROCESS_CMDS = ["efp", "absn"]
 
-# Live plot: intensity of each record, read by fs_plot.py from pdata/1/1r
+# Live plot: intensity of each record, read by dnp_viewer.py from pdata/1/1r
 PEAK_PPM        = 0          # centre of the intensity window (ppm); None = whole spectrum
 PEAK_WINDOW_PPM = 20.0       # full width of the window (ppm)
 INTENSITY_MODE  = "extreme"  # "extreme": largest |value| in the window, sign kept
                              # "max"    : largest value (for magnitude spectra, 'mc')
                              # "sum"    : sum of the points in the window
-LAUNCH_VIEWER   = True       # start fs_plot.py in the background when the run starts
+LAUNCH_VIEWER   = True       # start dnp_viewer.py in the background when the run starts
 RESPAWN_VIEWER  = True       # after each record, start it again if no viewer for this
                              # run is running (e.g. its window was closed)

@@ -8,7 +8,7 @@
 # of every point. With D1 300 s, NS 1 for ON and 16 for OFF, and 8 powers, a set takes
 # about 3.4 h. powdep_template.py explains every setting.
 
-#RUN_LABEL = "powdep_p1"
+#RUN_LABEL = "p1"
 
 SAMPLE   = "Diamond P1 center"
 MAS_INFO = "15 kHz MAS, 1.3 mm diamond(c-3-1) rotor, RT"
